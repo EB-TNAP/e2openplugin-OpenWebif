@@ -87,7 +87,10 @@ def getStream(session, request, m3ufile):
 			# Transcoding Plugin is not installed or your STB does not support transcoding
 			transcoder_port = None
 		if device == "phone":
-			portNumber = transcoder_port
+			# Only use transcoder port if it's properly configured
+			if transcoder_port is not None and transcoder_port > 0:
+				portNumber = transcoder_port
+			# Otherwise keep using standard streaming port (fallback)
 		_port = getUrlArg(request, "port")
 		if _port != None:
 			portNumber = _port
@@ -95,7 +98,7 @@ def getStream(session, request, m3ufile):
 		transcoder_port = portNumber
 
 	if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-		if device == "phone":
+		if device == "phone" and transcoder_port is not None and transcoder_port > 0:
 			try:
 				bitrate = config.plugins.transcodingsetup.bitrate.value
 				resolution = config.plugins.transcodingsetup.resolution.value
@@ -195,13 +198,16 @@ def getTS(self, request):
 				# Transcoding Plugin is not installed or your STB does not support transcoding
 				transcoder_port = None
 			if device == "phone":
-				portNumber = transcoder_port
+				# Only use transcoder port if it is properly configured
+				if transcoder_port is not None and transcoder_port > 0:
+					portNumber = transcoder_port
+				# Otherwise keep using standard streaming port (fallback)
 			_port = getUrlArg(request, "port")
 			if _port != None:
 				portNumber = _port
 
 		if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-			if device == "phone":
+			if device == "phone" and transcoder_port is not None and transcoder_port > 0:
 				try:
 					bitrate = config.plugins.transcodingsetup.bitrate.value
 					resolution = config.plugins.transcodingsetup.resolution.value
