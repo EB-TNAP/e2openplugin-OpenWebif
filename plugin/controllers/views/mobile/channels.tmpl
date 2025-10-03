@@ -38,10 +38,9 @@
 		</div>
 	</div>
 
-	<form name="portForm" action="/web/stream.m3u" method="GET" target="_blank">
+	<form name="portForm" action="/web/video.m3u" method="GET" target="_blank">
 		<input type="hidden" name="ref">
 		<input type="hidden" name="name">
-		<input type="hidden" name="device">
 	</form>
 <script>
 #raw
@@ -56,7 +55,6 @@ function zapChannel() {
 function jumper(mode) {
 	document.portForm.ref.value = sref;
 	document.portForm.name.value = sname;
-	document.portForm.device.value = mode;
 	document.portForm.submit();
 }
 function dlg(a,b)
