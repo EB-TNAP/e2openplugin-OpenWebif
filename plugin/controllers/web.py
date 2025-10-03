@@ -548,13 +548,18 @@ class WebController(BaseController):
 			session = GetSession()
 			if session.GetAuth(request) is not None:
 				auth = ':'.join(session.GetAuth(request)) + "@"
+				sid_param = ""
 			else:
-				auth = '-sid:' + ensure_str(session.GetSID(request)) + "@"
+				# Session ID should be passed as URL parameter, not in auth section
+				auth = ''
+				sid_param = "?sid=" + ensure_str(session.GetSID(request))
 		else:
 			auth = ''
+			sid_param = ""
 		portNumber = comp_config.OpenWebif.streamport.value
 		services["host"] = "%s:%s" % (request.getRequestHostname(), portNumber)
 		services["auth"] = auth
+		services["sid_param"] = sid_param
 		services["bname"] = bouquetName
 		return services
 
@@ -587,13 +592,18 @@ class WebController(BaseController):
 			session = GetSession()
 			if session.GetAuth(request) is not None:
 				auth = ':'.join(session.GetAuth(request)) + "@"
+				sid_param = ""
 			else:
-				auth = '-sid:' + ensure_str(session.GetSID(request)) + "@"
+				# Session ID should be passed as URL parameter, not in auth section
+				auth = ''
+				sid_param = "?sid=" + ensure_str(session.GetSID(request))
 		else:
 			auth = ''
+			sid_param = ""
 		portNumber = comp_config.OpenWebif.streamport.value
 		services["host"] = "%s:%s" % (request.getRequestHostname(), portNumber)
 		services["auth"] = auth
+		services["sid_param"] = sid_param
 		return services
 
 	def P_subservices(self, request):
