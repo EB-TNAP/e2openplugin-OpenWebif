@@ -38,10 +38,6 @@
 		</div>
 	</div>
 
-	<form name="portForm" action="/web/video.m3u" method="GET" target="_blank">
-		<input type="hidden" name="ref">
-		<input type="hidden" name="name">
-	</form>
 <script>
 #raw
 jQuery('#chpage').on('pageinit', function(event) {
@@ -53,9 +49,11 @@ function zapChannel() {
 	$.ajax('/api/zap?sRef=' + escape(sref));
 }
 function jumper(mode) {
-	document.portForm.ref.value = sref;
-	document.portForm.name.value = sname;
-	document.portForm.submit();
+	// Build the full stream URL
+	var streamUrl = window.location.protocol + '//' + window.location.host + '/web/video.m3u?ref=' + encodeURIComponent(sref) + '&name=' + encodeURIComponent(sname);
+
+	// Open directly - browser will prompt for app to handle M3U
+	window.location.href = streamUrl;
 }
 function dlg(a,b)
 {
