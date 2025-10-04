@@ -49,8 +49,8 @@ function zapChannel() {
 	$.ajax('/api/zap?sRef=' + escape(sref));
 }
 function jumper(mode) {
-	// Build the full stream URL
-	var streamUrl = window.location.protocol + '//' + window.location.host + '/web/video.m3u?ref=' + encodeURIComponent(sref) + '&name=' + encodeURIComponent(sname);
+	// Build the full stream URL with .m3u8 extension in fname parameter to force correct extension
+	var streamUrl = window.location.protocol + '//' + window.location.host + '/web/video.m3u?ref=' + encodeURIComponent(sref) + '&name=' + encodeURIComponent(sname) + '&fname=stream';
 
 	// Open directly - browser will prompt for app to handle M3U
 	window.location.href = streamUrl;
