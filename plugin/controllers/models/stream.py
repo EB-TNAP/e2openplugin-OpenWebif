@@ -95,7 +95,10 @@ def getStream(session, request, m3ufile):
 		if _port != None:
 			portNumber = _port
 	elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-		transcoder_port = portNumber
+		try:
+			transcoder_port = int(config.plugins.transcodingsetup.port.value)
+		except Exception:
+			transcoder_port = None
 
 	if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
 		if device == "phone" and transcoder_port is not None and transcoder_port > 0:
@@ -137,7 +140,10 @@ def getStream(session, request, m3ufile):
 	# Note: do not rename the m3u file all the time
 	fname = getUrlArg(request, "fname")
 	if fname != None:
-		request.setHeader('Content-Disposition', 'inline; filename=%s.%s;' % (fname, 'm3u8'))
+		request.setHeader('Content-Disposition', 'attachment; filename=%s.%s;' % (fname, 'm3u8'))
+	else:
+		# Always set Content-Disposition to trigger app chooser on mobile
+		request.setHeader('Content-Disposition', 'attachment; filename=stream.m3u8')
 	return response
 
 
@@ -253,6 +259,8 @@ def getTS(self, request):
 
 		response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s://%s%s:%s/file?file=%s%s\n" % ((progopt, proto, auth, request.getRequestHostname(), portNumber, quote(filename), args))
 		request.setHeader('Content-Type', 'application/x-mpegurl')
+		# Always set Content-Disposition to trigger app chooser on mobile
+		request.setHeader('Content-Disposition', 'attachment; filename=recording.m3u8')
 		return response
 	else:
 		return "Missing file parameter"
