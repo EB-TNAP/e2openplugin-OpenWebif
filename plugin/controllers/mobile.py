@@ -29,6 +29,8 @@ from Plugins.Extensions.OpenWebif.controllers.models.timers import getTimers
 from Plugins.Extensions.OpenWebif.controllers.models.services import getBouquets, getChannels, getChannelEpg, getEvent, getPicon
 from Plugins.Extensions.OpenWebif.controllers.defaults import TRANSCODING
 from Plugins.Extensions.OpenWebif.controllers.utilities import getUrlArg
+from Components.config import config
+from six import ensure_str
 
 
 class MobileController(BaseController):
@@ -133,3 +135,54 @@ class MobileController(BaseController):
 			from Plugins.Extensions.OpenWebif.controllers.models.owibranding import rc_model
 			REMOTE = rc_model().getRcFolder()
 		return {"remote": REMOTE}
+
+	def P_videoplayer(self, request):
+		"""
+		HTML5 video player for mobile browsers
+		"""
+		from six.moves.urllib.parse import unquote
+		from Plugins.Extensions.OpenWebif.controllers.models.stream import GetSession
+
+		sRef = getUrlArg(request, "ref")
+		if sRef:
+			sRef = unquote(unquote(sRef))
+		else:
+			sRef = ""
+
+		name = getUrlArg(request, "name", "Stream")
+
+		# Build stream URL
+		portNumber = config.OpenWebif.streamport.value
+
+		# Check for transcoding
+		device = getUrlArg(request, "device")
+		args = ""
+
+		try:
+			from Tools.Directories import fileExists
+			if fileExists("/dev/bcm_enc0"):
+				try:
+					transcoder_port = int(config.plugins.transcodingsetup.port.value)
+					if device == "phone":
+						portNumber = transcoder_port
+				except:
+					pass
+		except:
+			pass
+
+		# Authentication
+		if config.OpenWebif.auth_for_streaming.value:
+			asession = GetSession()
+			if asession.GetAuth(request) is not None:
+				auth = ':'.join(asession.GetAuth(request)) + "@"
+			else:
+				auth = '-sid:' + ensure_str(asession.GetSID(request)) + "@"
+		else:
+			auth = ''
+
+		streamurl = "http://%s%s:%s/%s%s" % (auth, request.getRequestHostname(), portNumber, sRef, args)
+
+		return {
+			"streamurl": streamurl,
+			"name": name
+		}
