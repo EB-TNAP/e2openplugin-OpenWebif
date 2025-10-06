@@ -65,81 +65,26 @@ video {
 		<span class="channel-name">$name</span>
 		<a href="javascript:history.back()" class="back-button">$tstrings['back']</a>
 	</div>
-	<div id="player-options" style="padding: 20px; text-align: center;">
-		<h3 style="color: #fff; margin-bottom: 20px;">Select Player</h3>
-		<button onclick="playInBrowser()" class="player-btn">Play in Browser</button>
-		<a href="vlc://$streamurl" class="player-btn">Open in VLC</a>
-		<a href="intent:$streamurl#Intent;type=video/*;package=com.mxtech.videoplayer.ad;end" class="player-btn">Open in MX Player</a>
-		<a href="intent:$streamurl#Intent;type=video/*;action=android.intent.action.VIEW;end" class="player-btn">Open in Other App</a>
+	<div style="padding: 20px; text-align: center;">
+		<h3 style="color: #fff; margin-bottom: 20px;">Opening stream...</h3>
+		<p style="color: #aaa;">If the app chooser doesn't appear, <a id="retry-link" href="#" style="color: #0066cc;">click here</a></p>
 	</div>
-	<video id="player" controls autoplay playsinline webkit-playsinline muted style="display:none;">
-		<source src="$streamurl" type="application/vnd.apple.mpegurl">
-		<source src="$streamurl" type="video/mp2t">
-		<p class="error">Your browser does not support HTML5 video streaming.</p>
-	</video>
 </div>
-<style>
-.player-btn {
-	display: block;
-	width: 100%;
-	max-width: 300px;
-	margin: 10px auto;
-	padding: 15px;
-	background: #0066cc;
-	color: #fff;
-	text-decoration: none;
-	border: none;
-	border-radius: 5px;
-	font-size: 16px;
-	cursor: pointer;
-}
-.player-btn:active {
-	background: #0052a3;
-}
-</style>
 <script>
-var video = document.getElementById('player');
-
-function playInBrowser() {
-	document.getElementById('player-options').style.display = 'none';
-	video.style.display = 'block';
-
-	// Unmute after starting (Chrome autoplay policy workaround)
-	video.addEventListener('playing', function() {
-		video.muted = false;
-	}, { once: true });
-
-	video.load();
-	video.play().catch(function(e) {
-		console.error('Play error:', e);
-	});
+// Automatically trigger the system app chooser
+function openStream() {
+	// Use Android intent to trigger system app chooser
+	window.location.href = 'intent:$streamurl#Intent;type=video/*;action=android.intent.action.VIEW;end';
 }
 
-video.addEventListener('error', function(e) {
-	console.error('Video error:', e);
-	var errorMsg = 'Stream error. ';
-	if (video.error) {
-		switch(video.error.code) {
-			case video.error.MEDIA_ERR_ABORTED:
-				errorMsg += 'Playback aborted.';
-				break;
-			case video.error.MEDIA_ERR_NETWORK:
-				errorMsg += 'Network error.';
-				break;
-			case video.error.MEDIA_ERR_DECODE:
-				errorMsg += 'Decoding error.';
-				break;
-			case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
-				errorMsg += 'Format not supported. Try VLC or MX Player instead.';
-				break;
-			default:
-				errorMsg += 'Unknown error.';
-		}
-	}
-	alert(errorMsg);
-	document.getElementById('player-options').style.display = 'block';
-	video.style.display = 'none';
-}, false);
+// Try to open immediately
+setTimeout(openStream, 500);
+
+// Allow manual retry
+document.getElementById('retry-link').addEventListener('click', function(e) {
+	e.preventDefault();
+	openStream();
+});
 </script>
 </body>
 </html>
