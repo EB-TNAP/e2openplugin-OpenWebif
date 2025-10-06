@@ -34,6 +34,18 @@ class GetSession(Resource):
 			return None
 
 
+def isMobileBrowser(request):
+	"""
+	Detect if the request is from a mobile browser
+	"""
+	user_agent = request.getHeader('user-agent')
+	if user_agent:
+		user_agent = user_agent.lower()
+		mobile_keywords = ['android', 'iphone', 'ipad', 'ipod', 'mobile', 'webos', 'blackberry', 'windows phone']
+		return any(keyword in user_agent for keyword in mobile_keywords)
+	return False
+
+
 def getStream(session, request, m3ufile):
 	sRef = getUrlArg(request, "ref")
 	if sRef != None:
@@ -125,16 +137,32 @@ def getStream(session, request, m3ufile):
 	else:
 		auth = ''
 
-	response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%shttp://%s%s:%s/%s%s\n" % (progopt, auth, request.getRequestHostname(), portNumber, sRef, args)
+	# Build the direct stream URL
+	stream_url = "http://%s%s:%s/%s%s" % (auth, request.getRequestHostname(), portNumber, sRef, args)
+
+	# For mobile browsers, redirect to HTML5 video player page
+	if isMobileBrowser(request):
+		from six.moves.urllib.parse import quote as url_quote
+		player_url = "/mobile/videoplayer?ref=%s&name=%s" % (url_quote(sRef), url_quote(name) if name else "Stream")
+		if device == "phone":
+			player_url += "&device=phone"
+		request.setResponseCode(302)
+		request.setHeader('Location', player_url)
+		return ""
+
+	# For desktop browsers, return M3U playlist
+	response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s\n" % (progopt, stream_url)
 	if config.OpenWebif.playiptvdirect.value:
 		if "http://" in sRef or "https://" in sRef:
 			l = sRef.split(":http")[1]
 			response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true\n%shttp%s\n" % (progopt, l)
-	request.setHeader('Content-Type', 'application/x-mpegurl')
+	request.setHeader('Content-Type', 'audio/x-mpegurl')
 	# Note: do not rename the m3u file all the time
 	fname = getUrlArg(request, "fname")
 	if fname != None:
-		request.setHeader('Content-Disposition', 'inline; filename=%s.%s;' % (fname, 'm3u8'))
+		request.setHeader('Content-Disposition', 'attachment; filename=%s.%s;' % (fname, 'm3u8'))
+	else:
+		request.setHeader('Content-Disposition', 'attachment; filename=stream.m3u')
 	return response
 
 
@@ -245,8 +273,20 @@ def getTS(self, request):
 		else:
 			auth = ''
 
-		response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s://%s%s:%s/file?file=%s%s\n" % ((progopt, proto, auth, request.getRequestHostname(), portNumber, quote(filename), args))
-		request.setHeader('Content-Type', 'application/x-mpegurl')
+		# Build the direct stream URL for recorded file
+		stream_url = "%s://%s%s:%s/file?file=%s%s" % (proto, auth, request.getRequestHostname(), portNumber, quote(filename), args)
+
+		# For mobile browsers, redirect directly to the video stream
+		if isMobileBrowser(request):
+			request.setHeader('Content-Type', 'video/mp2t')
+			request.setResponseCode(302)
+			request.setHeader('Location', stream_url)
+			return ""
+
+		# For desktop browsers, return M3U playlist
+		response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s\n" % (progopt, stream_url)
+		request.setHeader('Content-Type', 'audio/x-mpegurl')
+		request.setHeader('Content-Disposition', 'attachment; filename=recording.m3u')
 		return response
 	else:
 		return "Missing file parameter"
