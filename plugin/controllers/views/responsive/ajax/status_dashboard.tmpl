@@ -257,9 +257,9 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🛡️ OpenWebif Network Status Dashboard</h1>
+            <h1>OpenWebif Network Status Dashboard</h1>
             <p>SF8008 Receiver - Local Network Monitor</p>
-            <span class="badge local-only">🔒 LOCAL NETWORK ONLY</span>
+            <span class="badge local-only">LOCAL NETWORK ONLY</span>
             <span class="badge">Last Updated: <span id="last-update">Loading...</span></span>
         </div>
 
@@ -267,7 +267,7 @@
             <!-- Network Information Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">🌐</div>
+                    <div class="card-icon">[NET]</div>
                     <div class="card-title">Network Information</div>
                 </div>
                 <div class="card-content">
@@ -297,7 +297,7 @@
             <!-- WireGuard VPN Status Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">🔐</div>
+                    <div class="card-icon">[VPN]</div>
                     <div class="card-title">WireGuard VPN Status</div>
                 </div>
                 <div class="card-content">
@@ -327,7 +327,7 @@
             <!-- Brute Force Protection Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">🛡️</div>
+                    <div class="card-icon">[SEC]</div>
                     <div class="card-title">Brute Force Protection</div>
                 </div>
                 <div class="card-content">
@@ -358,7 +358,7 @@
             <!-- System Information Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">💻</div>
+                    <div class="card-icon">[SYS]</div>
                     <div class="card-title">System Information</div>
                 </div>
                 <div class="card-content">
@@ -391,7 +391,7 @@
             <!-- Recent Attack Activity Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">⚠️</div>
+                    <div class="card-icon">[!]</div>
                     <div class="card-title">Recent Attack Activity</div>
                 </div>
                 <div class="card-content">
@@ -413,7 +413,7 @@
             <!-- Currently Locked IPs Card -->
             <div class="card">
                 <div class="card-header">
-                    <div class="card-icon">🚫</div>
+                    <div class="card-icon">[X]</div>
                     <div class="card-title">Currently Locked IPs</div>
                 </div>
                 <div class="card-content">
@@ -427,7 +427,7 @@
         </div>
 
         <div class="refresh-indicator">
-            <span class="auto-refresh">●</span> Auto-refreshing every 5 seconds
+            <span class="auto-refresh">*</span> Auto-refreshing every 5 seconds
         </div>
     </div>
 
@@ -457,7 +457,7 @@
                 statusIndicator.className = 'status-indicator ' + (vpnOnline ? 'online' : 'offline');
 
                 const vpnStatusElem = document.getElementById('vpn-status');
-                vpnStatusElem.textContent = data.vpn.status === 'online' ? '✓ Online' : '✗ Offline';
+                vpnStatusElem.textContent = data.vpn.status === 'online' ? '[OK] Online' : '[!] Offline';
                 vpnStatusElem.className = 'stat-value ' + (vpnOnline ? 'success' : 'danger');
 
                 document.getElementById('vpn-ip').textContent = data.vpn.ip || 'N/A';
@@ -467,9 +467,9 @@
                 // VPN alert
                 const vpnAlert = document.getElementById('vpn-alert');
                 if (vpnOnline) {
-                    vpnAlert.innerHTML = '<div class="alert alert-success">✓ VPN is running - secure remote access enabled</div>';
+                    vpnAlert.innerHTML = '<div class="alert alert-success">[OK] VPN is running - secure remote access enabled</div>';
                 } else {
-                    vpnAlert.innerHTML = '<div class="alert alert-warning">⚠ VPN is not running - receiver exposed to internet</div>';
+                    vpnAlert.innerHTML = '<div class="alert alert-warning">[!] VPN is not running - receiver exposed to internet</div>';
                 }
 
                 // Update brute force protection
@@ -482,11 +482,11 @@
                 // Protection alert
                 const protectionAlert = document.getElementById('protection-alert');
                 if (data.protection.locked_ips > 0) {
-                    protectionAlert.innerHTML = '<div class="alert alert-danger">⚠ ' + data.protection.locked_ips + ' IPs currently locked out</div>';
+                    protectionAlert.innerHTML = '<div class="alert alert-danger">[!] ' + data.protection.locked_ips + ' IPs currently locked out</div>';
                 } else if (data.protection.tracked_ips > 0) {
-                    protectionAlert.innerHTML = '<div class="alert alert-warning">⚠ Monitoring ' + data.protection.tracked_ips + ' suspicious IPs</div>';
+                    protectionAlert.innerHTML = '<div class="alert alert-warning">[!] Monitoring ' + data.protection.tracked_ips + ' suspicious IPs</div>';
                 } else {
-                    protectionAlert.innerHTML = '<div class="alert alert-success">✓ No suspicious activity detected</div>';
+                    protectionAlert.innerHTML = '<div class="alert alert-success">[OK] No suspicious activity detected</div>';
                 }
 
                 // Update system info
@@ -507,11 +507,11 @@
                 if (data.locked_ips && data.locked_ips.length > 0) {
                     lockedList.innerHTML = data.locked_ips.map(ip =>
                         '<div class="ip-item locked">' +
-                        '🔒 ' + ip.ip + ' - ' + ip.attempts + ' attempts, locked for ' + ip.remaining + 's' +
+                        '[LOCKED] ' + ip.ip + ' - ' + ip.attempts + ' attempts, locked for ' + ip.remaining + 's' +
                         '</div>'
                     ).join('');
                 } else {
-                    lockedList.innerHTML = '<div style="text-align: center; color: #48bb78; padding: 20px;">✓ No IPs currently locked</div>';
+                    lockedList.innerHTML = '<div style="text-align: center; color: #48bb78; padding: 20px;">[OK] No IPs currently locked</div>';
                 }
 
                 updateTimestamp();
