@@ -25,6 +25,10 @@ from Components.config import config
 from time import mktime, localtime
 from six import ensure_str
 import os
+import socket
+import subprocess
+import time
+from datetime import datetime, timedelta
 
 from Plugins.Extensions.OpenWebif.controllers.models.services import getBouquets, getChannels, getAllServices, getSatellites, getProviders, getEventDesc, getSimilarEpg, getChannelEpg, getSearchEpg, getCurrentFullInfo, getMultiEpg, getEvent
 from Plugins.Extensions.OpenWebif.controllers.models.info import getInfo
@@ -36,6 +40,7 @@ from Plugins.Extensions.OpenWebif.controllers.base import BaseController
 from Plugins.Extensions.OpenWebif.controllers.models.locations import getLocations
 from Plugins.Extensions.OpenWebif.controllers.defaults import OPENWEBIFVER, getPublicPath, VIEWS_PATH, TRANSCODING, EXT_EVENT_INFO_SOURCE, HASAUTOTIMER, HASAUTOTIMERTEST, HASAUTOTIMERCHANGE, HASVPS, HASSERIES, ATSEARCHTYPES
 from Plugins.Extensions.OpenWebif.controllers.utilities import getUrlArg, getEventInfoProvider
+from Plugins.Extensions.OpenWebif import bruteforce_protection
 
 try:
 	from boxbranding import getBoxType, getMachineName, getMachineBrand, getMachineBuild
@@ -420,3 +425,381 @@ class AjaxController(BaseController):
 			'radioChannels': getAllServices(RADIO),
 		}
 		return {'data': ret}
+
+	def _check_local_network(self, request):
+		"""
+		Check if request is from local network (172.58.x.x or 192.168.x.x or 10.x.x.x)
+		Returns True if local, False otherwise
+		"""
+		client_ip = request.getClientAddress().host
+
+		# Allow localhost
+		if client_ip in ['127.0.0.1', '::1', 'localhost']:
+			return True
+
+		# Check for private network ranges
+		if client_ip.startswith('192.168.') or \
+		   client_ip.startswith('172.') or \
+		   client_ip.startswith('10.') or \
+		   client_ip.startswith('fe80::'):  # IPv6 link-local
+			return True
+
+		return False
+
+	def P_status_dashboard(self, request):
+		"""
+		Render the status dashboard HTML page
+		Only accessible from local network
+		"""
+		if not self._check_local_network(request):
+			return {
+				"result": False,
+				"message": "Access denied: Dashboard only accessible from local network"
+			}
+
+		return {
+			"result": True,
+			"template": "ajax/status_dashboard.tmpl"
+		}
+
+	def P_status_dashboard_data(self, request):
+		"""
+		Provide JSON data for the status dashboard
+		Only accessible from local network
+		"""
+		if not self._check_local_network(request):
+			return {
+				"result": False,
+				"message": "Access denied: Dashboard only accessible from local network"
+			}
+
+		# Collect all data
+		data = {
+			"network": self._get_network_info(),
+			"vpn": self._get_vpn_status(),
+			"protection": self._get_protection_stats(),
+			"system": self._get_system_info(),
+			"attacks": self._get_attack_stats(),
+			"locked_ips": self._get_locked_ips()
+		}
+
+		return data
+
+	def _get_network_info(self):
+		"""Get network information"""
+		try:
+			hostname = socket.gethostname()
+
+			# Get main interface and IP
+			interface = "unknown"
+			local_ip = "unknown"
+			gateway = "unknown"
+
+			try:
+				# Get default route interface
+				route_output = subprocess.check_output(['ip', 'route', 'show', 'default'],
+													   stderr=subprocess.STDOUT)
+				if route_output:
+					parts = route_output.decode('utf-8').strip().split()
+					if 'dev' in parts:
+						interface = parts[parts.index('dev') + 1]
+					if 'via' in parts:
+						gateway = parts[parts.index('via') + 1]
+			except:
+				pass
+
+			try:
+				# Get IP address of interface
+				if interface != "unknown":
+					ip_output = subprocess.check_output(['ip', 'addr', 'show', interface],
+													    stderr=subprocess.STDOUT)
+					lines = ip_output.decode('utf-8').split('\n')
+					for line in lines:
+						if 'inet ' in line:
+							local_ip = line.strip().split()[1].split('/')[0]
+							break
+			except:
+				pass
+
+			# Try to get public IP (with timeout)
+			public_ip = "Detecting..."
+			try:
+				# Quick check, 3 second timeout
+				public_ip = subprocess.check_output(
+					['wget', '-qO-', '--timeout=3', 'http://ipecho.net/plain'],
+					stderr=subprocess.STDOUT,
+					timeout=5
+				).decode('utf-8').strip()
+			except:
+				try:
+					public_ip = subprocess.check_output(
+						['wget', '-qO-', '--timeout=3', 'http://ifconfig.me'],
+						stderr=subprocess.STDOUT,
+						timeout=5
+					).decode('utf-8').strip()
+				except:
+					public_ip = "Unable to detect"
+
+			return {
+				"hostname": hostname,
+				"local_ip": local_ip,
+				"public_ip": public_ip,
+				"interface": interface,
+				"gateway": gateway
+			}
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting network info: %s" % str(e))
+			return {
+				"hostname": "unknown",
+				"local_ip": "unknown",
+				"public_ip": "unknown",
+				"interface": "unknown",
+				"gateway": "unknown"
+			}
+
+	def _get_vpn_status(self):
+		"""Get WireGuard VPN status"""
+		try:
+			# Check if wg0 interface exists and get status
+			wg_output = subprocess.check_output(['wg', 'show', 'wg0'],
+											    stderr=subprocess.STDOUT)
+			wg_text = wg_output.decode('utf-8')
+
+			# Parse WireGuard output
+			vpn_ip = "unknown"
+			peers = 0
+			last_handshake = "Never"
+
+			# Get VPN IP
+			try:
+				ip_output = subprocess.check_output(['ip', 'addr', 'show', 'wg0'],
+												    stderr=subprocess.STDOUT)
+				lines = ip_output.decode('utf-8').split('\n')
+				for line in lines:
+					if 'inet ' in line:
+						vpn_ip = line.strip().split()[1].split('/')[0]
+						break
+			except:
+				pass
+
+			# Count peers and get last handshake
+			for line in wg_text.split('\n'):
+				if line.startswith('peer:'):
+					peers += 1
+				if 'latest handshake:' in line:
+					last_handshake = line.split('latest handshake:')[1].strip()
+
+			return {
+				"status": "online",
+				"ip": vpn_ip,
+				"peers": str(peers),
+				"last_handshake": last_handshake
+			}
+		except subprocess.CalledProcessError:
+			# WireGuard not running
+			return {
+				"status": "offline",
+				"ip": "N/A",
+				"peers": "0",
+				"last_handshake": "N/A"
+			}
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting VPN status: %s" % str(e))
+			return {
+				"status": "error",
+				"ip": "Error",
+				"peers": "0",
+				"last_handshake": "Error"
+			}
+
+	def _get_protection_stats(self):
+		"""Get brute force protection statistics"""
+		try:
+			status = bruteforce_protection.get_status()
+
+			# Count locked IPs
+			locked_count = 0
+			for ip_data in status.get('details', []):
+				if ip_data.get('locked', False):
+					locked_count += 1
+
+			# Parse log file for additional stats
+			total_failed = 0
+			total_success = 0
+			global_attacks = 0
+
+			try:
+				if os.path.exists(bruteforce_protection.LOG_FILE):
+					with open(bruteforce_protection.LOG_FILE, 'r') as f:
+						for line in f:
+							if 'FAILED' in line:
+								total_failed += 1
+							if 'SUCCESS' in line:
+								total_success += 1
+							if 'GLOBAL ATTACK' in line:
+								global_attacks += 1
+			except:
+				pass
+
+			return {
+				"tracked_ips": str(status.get('tracked_ips', 0)),
+				"locked_ips": str(locked_count),
+				"total_failed": str(total_failed),
+				"total_success": str(total_success),
+				"global_attacks": str(global_attacks)
+			}
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting protection stats: %s" % str(e))
+			return {
+				"tracked_ips": "0",
+				"locked_ips": "0",
+				"total_failed": "0",
+				"total_success": "0",
+				"global_attacks": "0"
+			}
+
+	def _get_system_info(self):
+		"""Get system information"""
+		try:
+			# System name
+			system_name = "TNAP 6 SF8008"
+			try:
+				with open('/etc/issue', 'r') as f:
+					system_name = f.read().strip().split('\n')[0]
+			except:
+				pass
+
+			# Kernel version
+			kernel = "unknown"
+			try:
+				kernel = subprocess.check_output(['uname', '-r'],
+											    stderr=subprocess.STDOUT).decode('utf-8').strip()
+			except:
+				pass
+
+			# Uptime
+			uptime_str = "unknown"
+			try:
+				with open('/proc/uptime', 'r') as f:
+					uptime_seconds = float(f.read().split()[0])
+					days = int(uptime_seconds // 86400)
+					hours = int((uptime_seconds % 86400) // 3600)
+					minutes = int((uptime_seconds % 3600) // 60)
+					uptime_str = "%dd %dh %dm" % (days, hours, minutes)
+			except:
+				pass
+
+			# Load average
+			load_str = "unknown"
+			try:
+				with open('/proc/loadavg', 'r') as f:
+					load_str = ' '.join(f.read().split()[:3])
+			except:
+				pass
+
+			# Memory usage
+			memory_str = "unknown"
+			memory_percent = 0
+			try:
+				with open('/proc/meminfo', 'r') as f:
+					meminfo = {}
+					for line in f:
+						parts = line.split(':')
+						if len(parts) == 2:
+							meminfo[parts[0].strip()] = int(parts[1].strip().split()[0])
+
+					total = meminfo.get('MemTotal', 0)
+					free = meminfo.get('MemFree', 0) + meminfo.get('Buffers', 0) + meminfo.get('Cached', 0)
+					used = total - free
+
+					if total > 0:
+						memory_percent = int((used * 100.0) / total)
+						memory_str = "%d MB / %d MB (%d%%)" % (used // 1024, total // 1024, memory_percent)
+			except:
+				pass
+
+			return {
+				"name": system_name,
+				"kernel": kernel,
+				"uptime": uptime_str,
+				"load": load_str,
+				"memory": memory_str,
+				"memory_percent": memory_percent
+			}
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting system info: %s" % str(e))
+			return {
+				"name": "unknown",
+				"kernel": "unknown",
+				"uptime": "unknown",
+				"load": "unknown",
+				"memory": "unknown",
+				"memory_percent": 0
+			}
+
+	def _get_attack_stats(self):
+		"""Get recent attack statistics from log file"""
+		try:
+			now = time.time()
+			last_24h_count = 0
+			last_1h_count = 0
+			unique_ips = set()
+
+			if os.path.exists(bruteforce_protection.LOG_FILE):
+				with open(bruteforce_protection.LOG_FILE, 'r') as f:
+					for line in f:
+						if 'FAILED' not in line:
+							continue
+
+						# Parse timestamp
+						try:
+							timestamp_str = line.split('[')[1].split(']')[0]
+							log_time = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+							log_timestamp = time.mktime(log_time.timetuple())
+
+							# Count if within 24 hours
+							if now - log_timestamp < 86400:
+								last_24h_count += 1
+
+								# Extract IP
+								if 'IP ' in line:
+									ip_part = line.split('IP ')[1].split()[0].rstrip(',')
+									unique_ips.add(ip_part)
+
+							# Count if within 1 hour
+							if now - log_timestamp < 3600:
+								last_1h_count += 1
+						except:
+							continue
+
+			return {
+				"last_24h": str(last_24h_count),
+				"last_1h": str(last_1h_count),
+				"unique_ips": str(len(unique_ips))
+			}
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting attack stats: %s" % str(e))
+			return {
+				"last_24h": "0",
+				"last_1h": "0",
+				"unique_ips": "0"
+			}
+
+	def _get_locked_ips(self):
+		"""Get list of currently locked IPs"""
+		try:
+			status = bruteforce_protection.get_status()
+			locked_list = []
+
+			for ip_data in status.get('details', []):
+				if ip_data.get('locked', False):
+					locked_list.append({
+						"ip": ip_data.get('ip', 'unknown'),
+						"attempts": str(ip_data.get('attempts', 0)),
+						"remaining": str(ip_data.get('lockout_remaining', 0))
+					})
+
+			return locked_list
+		except Exception as e:
+			print("[OpenWebif] Status dashboard: Error getting locked IPs: %s" % str(e))
+			return []
