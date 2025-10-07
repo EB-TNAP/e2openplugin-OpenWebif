@@ -22,11 +22,7 @@
 
 from __future__ import print_function
 import os
-try:
-	import importlib.util
-	import importlib.machinery
-except ImportError:
-	import imp  # Python 2 fallback
+import imp
 import json
 import six
 
@@ -123,32 +119,15 @@ class BaseController(resource.Resource):
 
 	def loadTemplate(self, path, module, args):
 		if fileExists(getViewsPath(path + ".py")) or fileExists(getViewsPath(path + ".pyo")) or fileExists(getViewsPath(path + ".pyc")):
-			template = None
-			try:
-				# Python 3.4+ importlib method
-				if fileExists(getViewsPath(path + ".pyo")):
-					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".pyo"))
-				elif fileExists(getViewsPath(path + ".pyc")):
-					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".pyc"))
-				else:
-					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".py"))
-
-				if spec and spec.loader:
-					template = importlib.util.module_from_spec(spec)
-					spec.loader.exec_module(template)
-			except (NameError, AttributeError):
-				# Python 2 fallback
-				if fileExists(getViewsPath(path + ".pyo")):
-					template = imp.load_compiled(module, getViewsPath(path + ".pyo"))
-				elif fileExists(getViewsPath(path + ".pyc")):
-					template = imp.load_compiled(module, getViewsPath(path + ".pyc"))
-				else:
-					template = imp.load_source(module, getViewsPath(path + ".py"))
-
-			if template:
-				mod = getattr(template, module, None)
-				if callable(mod):
-					return str(mod(searchList=args))
+			if fileExists(getViewsPath(path + ".pyo")):
+				template = imp.load_compiled(module, getViewsPath(path + ".pyo"))
+			elif fileExists(getViewsPath(path + ".pyc")):
+				template = imp.load_compiled(module, getViewsPath(path + ".pyc"))
+			else:
+				template = imp.load_source(module, getViewsPath(path + ".py"))
+			mod = getattr(template, module, None)
+			if callable(mod):
+				return str(mod(searchList=args))
 		elif fileExists(getViewsPath(path + ".tmpl")):
 			vp = str(getViewsPath(path + ".tmpl"))
 			return str(Template(file=vp, searchList=[args]))
