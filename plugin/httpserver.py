@@ -32,13 +32,18 @@ from twisted.internet.error import CannotListenError
 
 from Plugins.Extensions.OpenWebif.controllers.root import RootController
 from Plugins.Extensions.OpenWebif.sslcertificate import SSLCertificateGenerator, KEY_FILE, CERT_FILE, CA_FILE, CHAIN_FILE
+from Plugins.Extensions.OpenWebif import bruteforce_protection
 from socket import has_ipv6
 from OpenSSL import SSL
 from OpenSSL import crypto
 from Components.Network import iNetwork
 
 import os
-import imp
+try:
+	import importlib.util
+	import importlib.machinery
+except ImportError:
+	import imp  # Python 2 fallback
 import ipaddress
 import six
 
@@ -159,10 +164,25 @@ def buildRootTree(session):
 
 				loaded.append(modulename)
 				try:
-					imp.load_source(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
+					# Python 3.4+ importlib method
+					try:
+						spec = importlib.util.spec_from_file_location(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
+						if spec and spec.loader:
+							module = importlib.util.module_from_spec(spec)
+							spec.loader.exec_module(module)
+					except (NameError, AttributeError):
+						# Python 2 fallback
+						imp.load_source(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
 				except Exception as e:
 					# maybe there's only the compiled version
-					imp.load_compiled(modulename, origwebifpath + "/WebChilds/External/" + external)
+					try:
+						spec = importlib.util.spec_from_file_location(modulename, origwebifpath + "/WebChilds/External/" + external)
+						if spec and spec.loader:
+							module = importlib.util.module_from_spec(spec)
+							spec.loader.exec_module(module)
+					except (NameError, AttributeError):
+						# Python 2 fallback
+						imp.load_compiled(modulename, origwebifpath + "/WebChilds/External/" + external)
 
 		if len(loaded_plugins) > 0:
 			for plugin in loaded_plugins:
@@ -403,6 +423,18 @@ class AuthResource(resource.Resource):
 			return self.resource.getChildWithDefault(path, request)
 
 	def login(self, user, passwd, peer):
+		# Log ALL login attempts for complete traffic log
+		bruteforce_protection.log_login_attempt(peer, user, False, "Attempting authentication")
+
+		# Apply brute force protection delay
+		# This checks if IP is locked out or needs a delay
+		if not bruteforce_protection.apply_delay(peer):
+			# IP is locked out - reject immediately
+			print("[OpenWebif] Brute force protection: Rejecting locked out IP %s" % peer)
+			bruteforce_protection.record_failed_attempt(peer, user)
+			bruteforce_protection.log_login_attempt(peer, user, False, "IP is locked out")
+			return False
+
 		if user == "root" and config.OpenWebif.no_root_access.value:
 			# Override "no root" for logins from local/private networks
 			samenet = False
@@ -412,7 +444,10 @@ class AuthResource(resource.Resource):
 					if ipaddress.ip_address(six.text_type(peer)) in ipaddress.ip_network(six.text_type(network), strict=False):
 						samenet = True
 			if not (ipaddress.ip_address(six.text_type(peer)).is_private or samenet):
+				bruteforce_protection.record_failed_attempt(peer, user)
+				bruteforce_protection.log_login_attempt(peer, user, False, "Root access blocked from external network")
 				return False
+
 		from crypt import crypt
 		from pwd import getpwnam
 		from spwd import getspnam
@@ -420,14 +455,35 @@ class AuthResource(resource.Resource):
 		try:
 			cpass = getpwnam(user)[1]
 		except:  # nosec # noqa: E722
+			bruteforce_protection.record_failed_attempt(peer, user)
+			bruteforce_protection.log_login_attempt(peer, user, False, "User not found")
 			return False
+
 		if cpass:
 			if cpass == 'x' or cpass == '*':
 				try:
 					cpass = getspnam(user)[1]
 				except:  # nosec # noqa: E722
+					bruteforce_protection.record_failed_attempt(peer, user)
+					bruteforce_protection.log_login_attempt(peer, user, False, "Shadow password error")
 					return False
-			return crypt(passwd, cpass) == cpass
+
+			# Check password
+			auth_result = crypt(passwd, cpass) == cpass
+
+			if auth_result:
+				# Successful login - clear failed attempts
+				bruteforce_protection.record_successful_login(peer, user)
+				bruteforce_protection.log_login_attempt(peer, user, True)
+				return True
+			else:
+				# Failed login - record attempt
+				bruteforce_protection.record_failed_attempt(peer, user)
+				bruteforce_protection.log_login_attempt(peer, user, False, "Invalid password")
+				return False
+
+		bruteforce_protection.record_failed_attempt(peer, user)
+		bruteforce_protection.log_login_attempt(peer, user, False, "No password hash found")
 		return False
 
 
