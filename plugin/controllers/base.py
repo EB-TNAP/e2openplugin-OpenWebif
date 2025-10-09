@@ -22,9 +22,16 @@
 
 from __future__ import print_function
 import os
-import imp
 import json
 import six
+# Python 3.12+ compatibility: imp module removed, use importlib
+try:
+	import importlib.util
+	import importlib.machinery
+	HAS_IMPORTLIB = True
+except ImportError:
+	HAS_IMPORTLIB = False
+	import imp  # Fallback for older Python versions
 
 from twisted.web import server, http, resource
 from twisted.web.resource import EncodingResourceWrapper
@@ -119,12 +126,25 @@ class BaseController(resource.Resource):
 
 	def loadTemplate(self, path, module, args):
 		if fileExists(getViewsPath(path + ".py")) or fileExists(getViewsPath(path + ".pyo")) or fileExists(getViewsPath(path + ".pyc")):
-			if fileExists(getViewsPath(path + ".pyo")):
-				template = imp.load_compiled(module, getViewsPath(path + ".pyo"))
-			elif fileExists(getViewsPath(path + ".pyc")):
-				template = imp.load_compiled(module, getViewsPath(path + ".pyc"))
+			# Python 3.12+ compatibility
+			if HAS_IMPORTLIB:
+				# Use importlib for Python 3.12+
+				if fileExists(getViewsPath(path + ".pyo")):
+					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".pyo"))
+				elif fileExists(getViewsPath(path + ".pyc")):
+					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".pyc"))
+				else:
+					spec = importlib.util.spec_from_file_location(module, getViewsPath(path + ".py"))
+				template = importlib.util.module_from_spec(spec)
+				spec.loader.exec_module(template)
 			else:
-				template = imp.load_source(module, getViewsPath(path + ".py"))
+				# Use imp for older Python versions
+				if fileExists(getViewsPath(path + ".pyo")):
+					template = imp.load_compiled(module, getViewsPath(path + ".pyo"))
+				elif fileExists(getViewsPath(path + ".pyc")):
+					template = imp.load_compiled(module, getViewsPath(path + ".pyc"))
+				else:
+					template = imp.load_source(module, getViewsPath(path + ".py"))
 			mod = getattr(template, module, None)
 			if callable(mod):
 				return str(mod(searchList=args))
