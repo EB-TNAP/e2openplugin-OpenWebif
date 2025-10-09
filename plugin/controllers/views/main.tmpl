@@ -217,7 +217,13 @@
 			#if not $showname
 				#set boxname=$tstrings['box_info']
 			#end if
-			<h2>$tstrings['openwebif_header']<br/><span class="ui-state-active" onclick="load_maincontent('ajax/boxinfo'); return false">$boxname</span></h2>
+			<h2>$tstrings['openwebif_header']
+			#if $firewall_active
+				<span style="color: #00ff00; margin-left: 20px; font-size: 0.8em;">&#x1F512; Firewall: ACTIVE</span>
+			#else
+				<span style="color: #ff0000; margin-left: 20px; font-size: 0.8em;">&#x26A0; Firewall: OFF</span>
+			#end if
+			<br/><span class="ui-state-active" onclick="load_maincontent('ajax/boxinfo'); return false">$boxname</span></h2>
 			<div id="statusheader">
 				<div id="osd">$tstrings['nothing_play']</div>
 				<div id="osd_status"></div>
