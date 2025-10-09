@@ -337,6 +337,16 @@ class BaseController(resource.Resource):
 			ret['boxname'] = getInfo()['brand'] + " " + getInfo()['model']
 		ret['box'] = getBoxType()
 		ret["remote"] = REMOTE
+
+		# Check firewall status
+		ret['firewall_active'] = False
+		try:
+			import subprocess
+			result = subprocess.run("iptables -L INPUT -n | head -1", shell=True, capture_output=True, text=True, timeout=2)
+			if result.returncode == 0 and "policy DROP" in result.stdout:
+				ret['firewall_active'] = True
+		except:
+			pass
 		if hasattr(eEPGCache, 'FULL_DESCRIPTION_SEARCH'):
 			ret['epgsearchcaps'] = True
 		else:
