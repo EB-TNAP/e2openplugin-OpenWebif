@@ -38,9 +38,25 @@ from OpenSSL import crypto
 from Components.Network import iNetwork
 
 import os
-import imp
 import ipaddress
 import six
+# Python 3.12+ compatibility: imp module removed, use importlib
+try:
+	import importlib.util
+	import importlib.machinery
+	HAS_IMPORTLIB = True
+except ImportError:
+	HAS_IMPORTLIB = False
+	import imp  # Fallback for older Python versions
+
+# Import brute force protection module
+try:
+	from Plugins.Extensions.OpenWebif import bruteforce_protection
+	BRUTEFORCE_PROTECTION_AVAILABLE = True
+	print("[OpenWebif] Brute force protection module loaded successfully")
+except ImportError:
+	BRUTEFORCE_PROTECTION_AVAILABLE = False
+	print("[OpenWebif] WARNING: Brute force protection module not available")
 
 global listener, server_to_stop, site, sslsite
 listener = []
@@ -159,10 +175,21 @@ def buildRootTree(session):
 
 				loaded.append(modulename)
 				try:
-					imp.load_source(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
+					# Python 3.12+ compatibility
+					if HAS_IMPORTLIB:
+						spec = importlib.util.spec_from_file_location(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
+						module = importlib.util.module_from_spec(spec)
+						spec.loader.exec_module(module)
+					else:
+						imp.load_source(modulename, origwebifpath + "/WebChilds/External/" + modulename + ".py")
 				except Exception as e:
 					# maybe there's only the compiled version
-					imp.load_compiled(modulename, origwebifpath + "/WebChilds/External/" + external)
+					if HAS_IMPORTLIB:
+						spec = importlib.util.spec_from_file_location(modulename, origwebifpath + "/WebChilds/External/" + external)
+						module = importlib.util.module_from_spec(spec)
+						spec.loader.exec_module(module)
+					else:
+						imp.load_compiled(modulename, origwebifpath + "/WebChilds/External/" + external)
 
 		if len(loaded_plugins) > 0:
 			for plugin in loaded_plugins:
@@ -314,6 +341,16 @@ class AuthResource(resource.Resource):
 		if peer.startswith("fe80::") and "%" in peer:
 			peer = peer.split("%")[0]
 
+		# Apply brute force protection delays/lockouts BEFORE attempting login
+		if BRUTEFORCE_PROTECTION_AVAILABLE:
+			allowed, delay_seconds = bruteforce_protection.check_and_get_delay(peer)
+			if not allowed:
+				# IP is locked out - reject immediately
+				request.setHeader('WWW-authenticate', 'Basic realm="%s"' % ("OpenWebif"))
+				errpage = resource.ErrorPage(http.UNAUTHORIZED, "Unauthorized", "Too many failed attempts. Try again later.")
+				return errpage.render(request)
+			# Note: delay_seconds is informational only here - actual delays applied in getChildWithDefault
+
 		if self.login(request.getUser(), request.getPassword(), peer) is False:
 			request.setHeader('WWW-authenticate', 'Basic realm="%s"' % ("OpenWebif"))
 			errpage = resource.ErrorPage(http.UNAUTHORIZED, "Unauthorized", "401 Authentication required")
@@ -391,6 +428,30 @@ class AuthResource(resource.Resource):
 		if "logged" in list(session.keys()) and session["logged"]:
 			return self.resource.getChildWithDefault(path, request)
 
+		# Apply brute force protection delays/lockouts BEFORE attempting login
+		if BRUTEFORCE_PROTECTION_AVAILABLE:
+			allowed, delay_seconds = bruteforce_protection.check_and_get_delay(peer)
+			if not allowed:
+				# IP is locked out - reject immediately
+				request.setHeader('WWW-authenticate', 'Basic realm="%s"' % ("OpenWebif"))
+				return resource.ErrorPage(http.UNAUTHORIZED, "Unauthorized", "Too many failed attempts. Try again later.")
+
+			# Apply progressive delay using Twisted's reactor (non-blocking)
+			if delay_seconds > 0:
+				from twisted.internet import reactor
+				print("[OpenWebif] Applying %d second delay for IP %s before authentication" % (delay_seconds, peer))
+				# Sleep using reactor.callLater for non-blocking delay
+				# Simple approach: use deferLater
+				from twisted.internet import task
+				d = task.deferLater(reactor, delay_seconds, lambda: None)
+				# After delay completes, continue with authentication
+				d.addCallback(lambda _: self._doAuthentication(ruser, rpw, peer, request, path, session))
+				return d
+
+		return self._doAuthentication(ruser, rpw, peer, request, path, session)
+
+	def _doAuthentication(self, ruser, rpw, peer, request, path, session):
+		"""Helper method to complete authentication after delay"""
 		if self.login(ruser, rpw, peer) is False:
 			request.setHeader('WWW-authenticate', 'Basic realm="%s"' % ("OpenWebif"))
 			return resource.ErrorPage(http.UNAUTHORIZED, "Unauthorized", "401 Authentication required")
@@ -403,6 +464,7 @@ class AuthResource(resource.Resource):
 			return self.resource.getChildWithDefault(path, request)
 
 	def login(self, user, passwd, peer):
+		# Root access check
 		if user == "root" and config.OpenWebif.no_root_access.value:
 			# Override "no root" for logins from local/private networks
 			samenet = False
@@ -412,7 +474,12 @@ class AuthResource(resource.Resource):
 					if ipaddress.ip_address(six.text_type(peer)) in ipaddress.ip_network(six.text_type(network), strict=False):
 						samenet = True
 			if not (ipaddress.ip_address(six.text_type(peer)).is_private or samenet):
+				# Record failed attempt due to root access restriction
+				if BRUTEFORCE_PROTECTION_AVAILABLE:
+					bruteforce_protection.record_failed_attempt(peer, user)
 				return False
+
+		# Password validation
 		from crypt import crypt
 		from pwd import getpwnam
 		from spwd import getspnam
@@ -420,14 +487,36 @@ class AuthResource(resource.Resource):
 		try:
 			cpass = getpwnam(user)[1]
 		except:  # nosec # noqa: E722
+			# User doesn't exist
+			if BRUTEFORCE_PROTECTION_AVAILABLE:
+				bruteforce_protection.record_failed_attempt(peer, user)
 			return False
+
 		if cpass:
 			if cpass == 'x' or cpass == '*':
 				try:
 					cpass = getspnam(user)[1]
 				except:  # nosec # noqa: E722
+					# Shadow password not accessible
+					if BRUTEFORCE_PROTECTION_AVAILABLE:
+						bruteforce_protection.record_failed_attempt(peer, user)
 					return False
-			return crypt(passwd, cpass) == cpass
+
+			# Check if password matches
+			if crypt(passwd, cpass) == cpass:
+				# Successful login - clear failed attempts for this IP
+				if BRUTEFORCE_PROTECTION_AVAILABLE:
+					bruteforce_protection.record_successful_login(peer, user)
+				return True
+			else:
+				# Wrong password
+				if BRUTEFORCE_PROTECTION_AVAILABLE:
+					bruteforce_protection.record_failed_attempt(peer, user)
+				return False
+
+		# No password found
+		if BRUTEFORCE_PROTECTION_AVAILABLE:
+			bruteforce_protection.record_failed_attempt(peer, user)
 		return False
 
 

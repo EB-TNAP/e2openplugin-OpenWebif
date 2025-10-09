@@ -45,6 +45,8 @@ MAX_TRACKING_TIME = 3600  # 1 hour - how long to remember failed attempts
 LOCKOUT_DURATION = 120    # 2 minutes - complete lockout after max attempts
 MAX_FAILED_ATTEMPTS = 5   # Number of attempts before lockout
 LOG_FILE = "/tmp/openwebif_brute_force.log"  # Log file location
+MAX_LOG_SIZE = 1048576    # 1MB - rotate log when it exceeds this size
+MAX_LOG_FILES = 3         # Keep 3 old rotated logs
 
 # Progressive delay schedule (attempt number -> delay in seconds)
 DELAY_SCHEDULE = {
@@ -69,21 +71,57 @@ GLOBAL_MAX_ATTEMPTS = 10  # Max attempts globally within window
 lock = threading.Lock()
 
 
-def log_to_file(message):
-    """
-    Write a log message to the brute force log file.
-    Includes timestamp and ensures thread-safe writes.
+def rotate_log():
+	"""
+	Rotate log file if it exceeds MAX_LOG_SIZE.
+	Keeps MAX_LOG_FILES old logs (.1, .2, .3)
+	"""
+	try:
+		if not os.path.exists(LOG_FILE):
+			return
 
-    Args:
-        message (str): The message to log
-    """
-    try:
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(LOG_FILE, "a") as f:
-            f.write("[%s] %s\n" % (timestamp, message))
-    except Exception as e:
-        # Don't let logging failures break the protection
-        print("[OpenWebif] Brute force protection: Failed to write to log file: %s" % str(e))
+		size = os.path.getsize(LOG_FILE)
+		if size > MAX_LOG_SIZE:
+			# Rotate old logs
+			for i in range(MAX_LOG_FILES - 1, 0, -1):
+				old_log = LOG_FILE + "." + str(i)
+				new_log = LOG_FILE + "." + str(i + 1)
+				if os.path.exists(old_log):
+					if i + 1 > MAX_LOG_FILES:
+						os.remove(old_log)
+					else:
+						if os.path.exists(new_log):
+							os.remove(new_log)
+						os.rename(old_log, new_log)
+
+			# Move current log to .1
+			if os.path.exists(LOG_FILE):
+				os.rename(LOG_FILE, LOG_FILE + ".1")
+
+			print("[OpenWebif] Brute force protection: Log rotated at %d bytes" % size)
+	except Exception as e:
+		# Don't let rotation failures break the protection
+		print("[OpenWebif] Brute force protection: Log rotation failed: %s" % str(e))
+
+
+def log_to_file(message):
+	"""
+	Write a log message to the brute force log file.
+	Includes timestamp, automatic rotation, and ensures thread-safe writes.
+
+	Args:
+		message (str): The message to log
+	"""
+	try:
+		# Check if rotation needed before writing
+		rotate_log()
+
+		timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+		with open(LOG_FILE, "a") as f:
+			f.write("[%s] %s\n" % (timestamp, message))
+	except Exception as e:
+		# Don't let logging failures break the protection
+		print("[OpenWebif] Brute force protection: Failed to write to log file: %s" % str(e))
 
 
 def log_login_attempt(ip_address, username, success, reason=""):
@@ -99,13 +137,13 @@ def log_login_attempt(ip_address, username, success, reason=""):
     """
     if success:
         msg = "LOGIN SUCCESS: IP %s, user '%s'" % (ip_address, username)
-        log_to_file("✓ %s" % msg)
+        log_to_file("[SUCCESS] %s" % msg)
     else:
         if reason:
             msg = "LOGIN FAILED: IP %s, user '%s' - %s" % (ip_address, username, reason)
         else:
             msg = "LOGIN FAILED: IP %s, user '%s'" % (ip_address, username)
-        log_to_file("✗ %s" % msg)
+        log_to_file("[FAILED] %s" % msg)
 
 
 def cleanup_old_entries():
@@ -210,7 +248,7 @@ def is_global_attack():
         if count >= GLOBAL_MAX_ATTEMPTS:
             msg = "GLOBAL ATTACK DETECTED - %d attempts in last %d seconds" % (count, GLOBAL_WINDOW)
             print("[OpenWebif] Brute force protection: %s" % msg)
-            log_to_file("⚠ GLOBAL ATTACK: %s" % msg)
+            log_to_file("[GLOBAL_ATTACK] %s" % msg)
             return True
     return False
 
@@ -225,6 +263,9 @@ def record_failed_attempt(ip_address, username="unknown"):
         ip_address (str): The IP address that failed to authenticate
         username (str): The username that was attempted
     """
+    # Clean up old entries to prevent memory leak
+    cleanup_old_entries()
+
     current_time = time.time()
 
     with lock:
@@ -233,7 +274,7 @@ def record_failed_attempt(ip_address, username="unknown"):
         global_attempts.append((current_time, ip_address))
         msg = "FAILED LOGIN from IP %s, user '%s' (global count in window: %d)" % (ip_address, username, len(global_attempts))
         print("[OpenWebif] Brute force protection: %s" % msg)
-        log_to_file("✗ FAILED: %s" % msg)
+        log_to_file("[FAILED_ATTEMPT] %s" % msg)
 
         # Per-IP tracking
         if ip_address not in failed_attempts:
@@ -257,7 +298,7 @@ def record_failed_attempt(ip_address, username="unknown"):
                 failed_attempts[ip_address]['locked_until'] = current_time + LOCKOUT_DURATION
                 msg = "IP %s - LOCKED OUT for %d seconds (%d minutes)" % (ip_address, LOCKOUT_DURATION, LOCKOUT_DURATION / 60)
                 print("[OpenWebif] Brute force protection: %s" % msg)
-                log_to_file("  🔒 LOCKOUT: %s" % msg)
+                log_to_file("[LOCKOUT] %s" % msg)
 
 
 def record_successful_login(ip_address, username="unknown"):
@@ -274,57 +315,95 @@ def record_successful_login(ip_address, username="unknown"):
             del failed_attempts[ip_address]
             msg = "IP %s, user '%s' - Successful login, cleared %d failed attempts" % (ip_address, username, attempts)
             print("[OpenWebif] Brute force protection: %s" % msg)
-            log_to_file("✓ SUCCESS: %s" % msg)
+            log_to_file("[SUCCESS_CLEARED] %s" % msg)
         else:
             msg = "IP %s, user '%s' - Successful login (no prior failures)" % (ip_address, username)
             print("[OpenWebif] Brute force protection: %s" % msg)
-            log_to_file("✓ SUCCESS: %s" % msg)
+            log_to_file("[SUCCESS] %s" % msg)
+
+
+def check_and_get_delay(ip_address):
+	"""
+	Check if IP is allowed to proceed and get required delay.
+	DOES NOT SLEEP - returns delay value for caller to handle.
+
+	This prevents DoS via time.sleep() blocking the Twisted reactor.
+
+	Args:
+		ip_address (str): The IP address attempting to log in
+
+	Returns:
+		tuple: (allowed, delay_seconds)
+			allowed (bool): True if IP can proceed (possibly after delay), False if locked out
+			delay_seconds (int): Seconds to delay before allowing login (0 = immediate)
+	"""
+	# Check if IP is locked out FIRST - reject immediately
+	is_locked, remaining = is_ip_locked(ip_address)
+	if is_locked:
+		msg = "IP %s is LOCKED OUT for %d more seconds - REJECTING IMMEDIATELY" % (ip_address, remaining)
+		print("[OpenWebif] Brute force protection: %s" % msg)
+		log_to_file("[BLOCKED_LOCKOUT] %s" % msg)
+		return False, 0  # Not allowed, no delay needed (immediate rejection)
+
+	# Check for global attack
+	delay = 0
+	if is_global_attack():
+		global_delay = 10  # 10 second delay for all requests during global attack
+		msg = "Global attack mode - %d second delay required for IP %s" % (global_delay, ip_address)
+		print("[OpenWebif] Brute force protection: %s" % msg)
+		log_to_file("[DELAY_GLOBAL] %s" % msg)
+		delay = max(delay, global_delay)
+
+	# Check per-IP delay
+	per_ip_delay = get_required_delay(ip_address)
+	if per_ip_delay > 0:
+		msg = "%d second delay required for IP %s" % (per_ip_delay, ip_address)
+		print("[OpenWebif] Brute force protection: %s" % msg)
+		log_to_file("[DELAY_PROGRESSIVE] %s" % msg)
+		delay = max(delay, per_ip_delay)
+
+	return True, delay  # Allowed (possibly after delay)
 
 
 def apply_delay(ip_address):
-    """
-    Apply the required delay for an IP address.
-    This function blocks/sleeps for the required time.
-    Also applies global delay if under attack from multiple IPs.
+	"""
+	DEPRECATED: Use check_and_get_delay() instead to avoid blocking.
+	This function is kept for backward compatibility but uses non-blocking approach.
 
-    IMPORTANT: Locked out IPs return immediately (no sleep) to avoid blocking the web server.
+	Apply the required delay for an IP address.
+	Uses Twisted reactor for non-blocking delays when available.
 
-    Args:
-        ip_address (str): The IP address attempting to log in
+	Args:
+		ip_address (str): The IP address attempting to log in
 
-    Returns:
-        bool: True if delay was applied, False if IP is locked out
-    """
-    # Check if IP is locked out FIRST - reject immediately without sleeping
-    is_locked, remaining = is_ip_locked(ip_address)
-    if is_locked:
-        msg = "IP %s is LOCKED OUT for %d more seconds - REJECTING IMMEDIATELY" % (ip_address, remaining)
-        print("[OpenWebif] Brute force protection: %s" % msg)
-        log_to_file("  🚫 BLOCKED: %s" % msg)
-        return False  # Return immediately, no sleep!
+	Returns:
+		bool: True if allowed (possibly after delay), False if locked out
+	"""
+	allowed, delay_seconds = check_and_get_delay(ip_address)
 
-    # Check for global attack
-    if is_global_attack():
-        global_delay = 10  # 10 second delay for all requests during global attack
-        msg = "Global attack mode - applying %d second delay for IP %s" % (global_delay, ip_address)
-        print("[OpenWebif] Brute force protection: %s" % msg)
-        log_to_file("  ⏱ DELAY: %s" % msg)
-        time.sleep(global_delay)
+	if not allowed:
+		return False
 
-    # Then check per-IP delay
-    delay = get_required_delay(ip_address)
-
-    if delay == 0:
-        return True
-
-    # Apply progressive delay (but keep it reasonable - max 20 seconds)
-    if delay > 0:
-        msg = "Applying %d second delay for IP %s" % (delay, ip_address)
-        print("[OpenWebif] Brute force protection: %s" % msg)
-        log_to_file("  ⏱ DELAY: %s" % msg)
-        time.sleep(delay)
-
-    return True
+	# Try to use Twisted's non-blocking delay if available
+	try:
+		from twisted.internet import reactor
+		if delay_seconds > 0:
+			msg = "Applying %d second non-blocking delay for IP %s" % (delay_seconds, ip_address)
+			print("[OpenWebif] Brute force protection: %s" % msg)
+			# Return a Deferred for async handling
+			from twisted.internet import defer
+			d = defer.Deferred()
+			reactor.callLater(delay_seconds, d.callback, True)
+			return d
+		else:
+			return True
+	except ImportError:
+		# Twisted not available, fall back to blocking sleep
+		if delay_seconds > 0:
+			msg = "Applying %d second blocking delay for IP %s (Twisted not available)" % (delay_seconds, ip_address)
+			print("[OpenWebif] Brute force protection: %s" % msg)
+			time.sleep(delay_seconds)
+		return True
 
 
 def get_status():
