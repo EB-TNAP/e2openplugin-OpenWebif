@@ -80,6 +80,7 @@ class FileController(resource.Resource):
 			elif action == "download":
 				request.setHeader("Content-Disposition", "attachment;filename=\"%s\"" % (filename.split('/')[-1]))
 				rfile = static.File(six.ensure_binary(filename), defaultType="application/octet-stream")
+				rfile.bufferSize = 262144
 				return rfile.render(request)
 			else:
 				return "wrong action parameter"

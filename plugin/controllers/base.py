@@ -182,9 +182,13 @@ class BaseController(resource.Resource):
 				filename = os.path.basename(file_path)
 				request.setHeader('content-disposition', 'filename="%s"' % filename)
 				request.setHeader('content-type', "image/png")
-				f = open(file_path, "rb")
-				yield FileSender().beginFileTransfer(f, request)
-				f.close()
+				f = None
+				try:
+					f = open(file_path, "rb")
+					yield FileSender().beginFileTransfer(f, request)
+				finally:
+					if f:
+						f.close()
 				defer.returnValue(0)
 
 			if os.path.exists(data):
