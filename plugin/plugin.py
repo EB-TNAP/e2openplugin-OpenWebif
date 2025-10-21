@@ -29,11 +29,13 @@ from Components.ActionMap import ActionMap
 from Components.Label import Label
 from Components.ConfigList import ConfigListScreen
 from Components.config import config, ConfigSubsection, ConfigInteger, ConfigYesNo, ConfigText, ConfigSelection, configfile
-from enigma import getDesktop
+from Components.ScrollLabel import ScrollLabel
+from enigma import getDesktop, eConsoleAppContainer
 from Plugins.Extensions.OpenWebif.controllers.models.info import getInfo
 from Plugins.Extensions.OpenWebif.controllers.defaults import EXT_EVENT_INFO_SOURCE, getIP, setDebugEnabled
 from Plugins.Extensions.OpenWebif.httpserver import HttpdStart, HttpdStop, HttpdRestart
 from Plugins.Extensions.OpenWebif.controllers.i18n import _
+import os
 
 # not used redmond -> original , trontastic , ui-lightness
 THEMES = [
@@ -112,15 +114,122 @@ vtiaddon.expandConfig()
 imagedistro = getInfo()['imagedistro']
 
 
+class BruteForceLogViewer(Screen):
+	"""Screen to view the brute force protection log"""
+	skin = """
+	<screen position="center,center" size="1170,780" title="Brute Force Protection Log">
+		<widget name="logtext" position="13,13" size="1144,702" font="Console;23" />
+		<ePixmap position="260,715" size="182,52" pixmap="skin_default/buttons/red.png" alphatest="on" />
+		<widget name="key_red" position="260,715" zPosition="1" size="182,52" font="Regular;26" halign="center" valign="center" backgroundColor="red" transparent="1" />
+		<ePixmap position="520,715" size="182,52" pixmap="skin_default/buttons/green.png" alphatest="on" />
+		<widget name="key_green" position="520,715" zPosition="1" size="182,52" font="Regular;26" halign="center" valign="center" backgroundColor="green" transparent="1" />
+		<ePixmap position="780,715" size="182,52" pixmap="skin_default/buttons/yellow.png" alphatest="on" />
+		<widget name="key_yellow" position="780,715" zPosition="1" size="182,52" font="Regular;26" halign="center" valign="center" backgroundColor="yellow" transparent="1" />
+	</screen>"""
+
+	def __init__(self, session):
+		Screen.__init__(self, session)
+		self.skin = BruteForceLogViewer.skin
+
+		self["logtext"] = ScrollLabel("")
+		self["key_red"] = Label(_("Close"))
+		self["key_green"] = Label(_("Refresh"))
+		self["key_yellow"] = Label(_("Clear Log"))
+
+		self["actions"] = ActionMap(["WizardActions", "ColorActions", "DirectionActions"],
+		{
+			"ok": self.close,
+			"back": self.close,
+			"red": self.close,
+			"green": self.refreshLog,
+			"yellow": self.clearLog,
+			"up": self["logtext"].pageUp,
+			"down": self["logtext"].pageDown,
+			"left": self["logtext"].pageUp,
+			"right": self["logtext"].pageDown,
+		}, -2)
+
+		self.onLayoutFinish.append(self.loadLog)
+		self.onLayoutFinish.append(self.setWindowTitle)
+
+	def setWindowTitle(self):
+		self.setTitle(_("Brute Force Protection Log"))
+
+	def loadLog(self):
+		"""Load and display the brute force log"""
+		log_file = "/tmp/openwebif_brute_force.log"
+
+		if not os.path.exists(log_file):
+			self["logtext"].setText(_("No brute force log found.\n\nThe log file will be created when the first login attempt is made."))
+			return
+
+		try:
+			# Read main log file
+			with open(log_file, "r") as f:
+				log_content = f.read()
+
+			# Check for rotated logs and show count
+			rotated_count = 0
+			for i in range(1, 4):  # Check for .1, .2, .3
+				rotated_log = log_file + "." + str(i)
+				if os.path.exists(rotated_log):
+					rotated_count += 1
+
+			if rotated_count > 0:
+				header = "=== Current Log (Rotated logs: %d) ===\n\n" % rotated_count
+			else:
+				header = "=== Brute Force Protection Log ===\n\n"
+
+			if log_content.strip():
+				# Show last 500 lines to avoid memory issues
+				lines = log_content.split("\n")
+				if len(lines) > 500:
+					log_content = "\n".join(lines[-500:])
+					header += "(Showing last 500 lines)\n\n"
+
+				self["logtext"].setText(header + log_content)
+			else:
+				self["logtext"].setText(_("Log file is empty."))
+		except Exception as e:
+			self["logtext"].setText(_("Error reading log file:\n%s") % str(e))
+
+	def refreshLog(self):
+		"""Reload the log file"""
+		self.loadLog()
+
+	def clearLog(self):
+		"""Clear the brute force log"""
+		log_file = "/tmp/openwebif_brute_force.log"
+
+		try:
+			if os.path.exists(log_file):
+				# Clear the log file
+				open(log_file, "w").close()
+
+				# Also remove rotated logs
+				for i in range(1, 4):
+					rotated_log = log_file + "." + str(i)
+					if os.path.exists(rotated_log):
+						os.remove(rotated_log)
+
+				self["logtext"].setText(_("Log cleared successfully."))
+			else:
+				self["logtext"].setText(_("No log file to clear."))
+		except Exception as e:
+			self["logtext"].setText(_("Error clearing log:\n%s") % str(e))
+
+
 class OpenWebifConfig(Screen, ConfigListScreen):
 	skin = """
 	<screen position="center,center" size="700,340" title="OpenWebif Configuration">
 		<widget name="lab1" position="10,30" halign="center" size="680,60" zPosition="1" font="Regular;24" valign="top" transparent="1" />
 		<widget name="config" position="10,100" size="680,180" scrollbarMode="showOnDemand" />
-		<ePixmap position="140,290" size="140,40" pixmap="skin_default/buttons/red.png" alphatest="on" />
-		<widget name="key_red" position="140,290" zPosition="1" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="red" transparent="1" />
-		<ePixmap position="420,290" size="140,40" pixmap="skin_default/buttons/green.png" alphatest="on" zPosition="1" />
-		<widget name="key_green" position="420,290" zPosition="2" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="green" transparent="1" />
+		<ePixmap position="10,290" size="140,40" pixmap="skin_default/buttons/red.png" alphatest="on" />
+		<widget name="key_red" position="10,290" zPosition="1" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="red" transparent="1" />
+		<ePixmap position="185,290" size="140,40" pixmap="skin_default/buttons/green.png" alphatest="on" zPosition="1" />
+		<widget name="key_green" position="185,290" zPosition="2" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="green" transparent="1" />
+		<ePixmap position="360,290" size="140,40" pixmap="skin_default/buttons/blue.png" alphatest="on" zPosition="1" />
+		<widget name="key_blue" position="360,290" zPosition="2" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="blue" transparent="1" />
 	</screen>"""
 
 	def __init__(self, session):
@@ -131,6 +240,7 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 		ConfigListScreen.__init__(self, self.list)
 		self["key_red"] = Label(_("Cancel"))
 		self["key_green"] = Label(_("Save"))
+		self["key_blue"] = Label(_("Brute Force Log"))
 
 		owif_protocol = "https" if config.OpenWebif.https_enabled.value else "http"
 		owif_port = config.OpenWebif.https_port.value if config.OpenWebif.https_enabled.value else config.OpenWebif.port.value
@@ -149,6 +259,7 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 			"red": self.keyCancel,
 			"back": self.keyCancel,
 			"green": self.keySave,
+			"blue": self.showBruteForceLog,
 
 		}, -2)
 		self.runSetup()
@@ -229,6 +340,10 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 		for x in self["config"].list:
 			x[1].cancel()
 		self.close()
+
+	def showBruteForceLog(self):
+		"""Open the brute force protection log viewer"""
+		self.session.open(BruteForceLogViewer)
 
 
 def confplug(session, **kwargs):
