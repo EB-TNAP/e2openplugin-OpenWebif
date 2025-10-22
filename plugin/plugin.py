@@ -285,7 +285,7 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 				self.list.append((_("HTTPS port"), config.OpenWebif.https_port))
 				self.list.append((_("Enable HTTPS Authentication"), config.OpenWebif.https_auth))
 				self.list.append((_("Require client cert for HTTPS"), config.OpenWebif.https_clientcert))
-			if config.OpenWebif.auth.value:
+			if config.OpenWebif.auth.value or (config.OpenWebif.https_enabled.value and config.OpenWebif.https_auth.value):
 				self.list.append((_("Enable Authentication for streaming"), config.OpenWebif.auth_for_streaming))
 				self.list.append((_("Disable remote access for user root"), config.OpenWebif.no_root_access))
 			if not config.OpenWebif.auth.value or (config.OpenWebif.https_enabled.value and not config.OpenWebif.https_auth.value):
@@ -321,7 +321,8 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 		for x in self["config"].list:
 			x[1].save()
 
-		if not config.OpenWebif.auth.value is True:
+		# Only disable auth_for_streaming if both HTTP auth AND HTTPS auth are disabled
+		if not config.OpenWebif.auth.value and not (config.OpenWebif.https_enabled.value and config.OpenWebif.https_auth.value):
 			config.OpenWebif.auth_for_streaming.value = False
 			config.OpenWebif.auth_for_streaming.save()
 
