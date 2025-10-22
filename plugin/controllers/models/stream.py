@@ -104,9 +104,18 @@ def getStream(session, request, m3ufile):
 		if _port != None:
 			portNumber = _port
 	elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-		transcoder_port = portNumber
+		# Use dedicated transcoding port 8002 for HiSilicon/Xtrend encoders
+		try:
+			transcoder_port = int(config.OpenWebif.transcodeport.value)
+		except Exception:
+			transcoder_port = 8002  # Default to 8002 if not configured
+		if device == "phone":
+			portNumber = transcoder_port
+			# Port 8002 automatically applies transcoding, no URL parameters needed
+			args = ""
 
-	if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+	if fileExists("/dev/bcm_enc0"):
+		# Broadcom encoders still need URL parameters on their transcoder port
 		if device == "phone":
 			try:
 				bitrate = config.plugins.transcodingsetup.bitrate.value
@@ -216,25 +225,36 @@ def getTS(self, request):
 
 		device = getUrlArg(request, "device")
 
-		if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+		if fileExists("/dev/bcm_enc0"):
+			# Broadcom encoder
 			try:
 				transcoder_port = int(config.plugins.transcodingsetup.port.value)
 			except Exception:
-				# Transcoding Plugin is not installed or your STB does not support transcoding
 				transcoder_port = None
 			if device == "phone":
 				portNumber = transcoder_port
 			_port = getUrlArg(request, "port")
 			if _port != None:
 				portNumber = _port
+		elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+			# HiSilicon/Xtrend encoder - use dedicated transcoding port 8002
+			try:
+				transcoder_port = int(config.OpenWebif.transcodeport.value)
+			except Exception:
+				transcoder_port = 8002
+			if device == "phone":
+				portNumber = transcoder_port
+			_port = getUrlArg(request, "port")
+			if _port != None:
+				portNumber = _port
 
-		if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+		if fileExists("/dev/bcm_enc0"):
+			# Broadcom encoders need URL parameters
 			if device == "phone":
 				try:
 					bitrate = config.plugins.transcodingsetup.bitrate.value
 					resolution = config.plugins.transcodingsetup.resolution.value
 					(width, height) = tuple(resolution.split('x'))
-					# framerate = config.plugins.transcodingsetup.framerate.value
 					aspectratio = config.plugins.transcodingsetup.aspectratio.value
 					interlaced = config.plugins.transcodingsetup.interlaced.value
 					if fileExists("/proc/stb/encoder/0/vcodec"):
@@ -249,6 +269,12 @@ def getTS(self, request):
 			position = getUrlArg(request, "position")
 			if position != None:
 				args = args + "&position=" + position
+		elif (fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply")) and device == "phone":
+			# HiSilicon/Xtrend - port 8002 handles transcoding automatically, no args needed
+			# Only add position parameter if provided
+			position = getUrlArg(request, "position")
+			if position != None:
+				args = "?position=" + position
 
 		# When you use EXTVLCOPT:program in a transcoded stream, VLC does not play stream
 		if config.OpenWebif.service_name_for_stream.value and sRef != '' and portNumber != transcoder_port:
