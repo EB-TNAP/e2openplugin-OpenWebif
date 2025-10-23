@@ -104,15 +104,20 @@ def getStream(session, request, m3ufile):
 		if _port != None:
 			portNumber = _port
 	elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-		# Use dedicated transcoding port 8002 for HiSilicon/Xtrend encoders
-		try:
-			transcoder_port = int(config.OpenWebif.transcodeport.value)
-		except Exception:
-			transcoder_port = 8002  # Default to 8002 if not configured
+		# HiSilicon/Xtrend encoders - use standard port with transcoding parameters
 		if device == "phone":
-			portNumber = transcoder_port
-			# Port 8002 automatically applies transcoding, no URL parameters needed
-			args = ""
+			portNumber = streamport
+			# Add transcoding parameters to URL
+			try:
+				bitrate = config.plugins.transcodingsetup.bitrate.value
+				width = config.plugins.transcodingsetup.width.value
+				height = config.plugins.transcodingsetup.height.value
+				aspectratio = config.plugins.transcodingsetup.aspectratio.value
+				interlaced = config.plugins.transcodingsetup.interlaced.value
+				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
+			except Exception:
+				# Fallback to safe defaults
+				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
 
 	if fileExists("/dev/bcm_enc0"):
 		# Broadcom encoders still need URL parameters on their transcoder port
@@ -237,13 +242,9 @@ def getTS(self, request):
 			if _port != None:
 				portNumber = _port
 		elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-			# HiSilicon/Xtrend encoder - use dedicated transcoding port 8002
-			try:
-				transcoder_port = int(config.OpenWebif.transcodeport.value)
-			except Exception:
-				transcoder_port = 8002
+			# HiSilicon/Xtrend encoder - use standard port with parameters
 			if device == "phone":
-				portNumber = transcoder_port
+				portNumber = streamport
 			_port = getUrlArg(request, "port")
 			if _port != None:
 				portNumber = _port
@@ -270,11 +271,20 @@ def getTS(self, request):
 			if position != None:
 				args = args + "&position=" + position
 		elif (fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply")) and device == "phone":
-			# HiSilicon/Xtrend - port 8002 handles transcoding automatically, no args needed
-			# Only add position parameter if provided
+			# HiSilicon/Xtrend - add transcoding parameters like live streams
+			try:
+				bitrate = config.plugins.transcodingsetup.bitrate.value
+				width = config.plugins.transcodingsetup.width.value
+				height = config.plugins.transcodingsetup.height.value
+				aspectratio = config.plugins.transcodingsetup.aspectratio.value
+				interlaced = config.plugins.transcodingsetup.interlaced.value
+				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
+			except Exception:
+				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
+			# Add position parameter if provided
 			position = getUrlArg(request, "position")
 			if position != None:
-				args = "?position=" + position
+				args = args + "&position=" + position
 
 		# When you use EXTVLCOPT:program in a transcoded stream, VLC does not play stream
 		if config.OpenWebif.service_name_for_stream.value and sRef != '' and portNumber != transcoder_port:
