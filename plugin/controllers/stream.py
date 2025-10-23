@@ -1,146 +1,367 @@
 # -*- coding: utf-8 -*-
 
-##########################################################################
-# OpenWebif: StreamAdapter, StreamController
-##########################################################################
-# Copyright (C) 2011 - 2020 E2OpenPlugins
-#
-# This program is free software; you can redistribute it and/or modify it
-# under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program; if not, write to the Free Software Foundation,
-# Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
-##########################################################################
-
-from twisted.web import resource, server
-from twisted.internet import reactor
-from Components.Converter.Streaming import Streaming
-from Components.Sources.StreamService import StreamService
-from Plugins.Extensions.OpenWebif.controllers.utilities import PY3
-import weakref
-
-streamList = []
-streamStates = []
-
-MAX_CONCURRENT_STREAMS = 10
-STREAM_TIMEOUT = 300
+##############################################################################
+#                        2011 E2OpenPlugins                                  #
+#                                                                            #
+#  This file is open source software; you can redistribute it and/or modify  #
+#     it under the terms of the GNU General Public License version 2 as      #
+#               published by the Free Software Foundation.                   #
+#                                                                            #
+##############################################################################
+from enigma import eServiceReference, getBestPlayableServiceReference
+from ServiceReference import ServiceReference
+from six.moves.urllib.parse import unquote, quote
+from six import ensure_str
+import os
+import re
+from Components.config import config
+from twisted.web.resource import Resource
+from Tools.Directories import fileExists
+from Plugins.Extensions.OpenWebif.controllers.models.info import getInfo
+from Plugins.Extensions.OpenWebif.controllers.utilities import getUrlArg, PY3
 
 
-class StreamAdapter:
-	EV_BEGIN = 0
-	EV_STOP = 1
+class GetSession(Resource):
+	def GetSID(self, request):
+		sid = request.getSession().uid
+		return sid
 
-	def __init__(self, session, request):
-		self.nav = session.nav
-		self.request = request
-		self.converter = None
-		self.timeout_call = None
-		self._closed = False
-
-		self.mystream = StreamService(self.nav)
-		if PY3:
-			self.mystream.handleCommand(request.args[b"StreamService"][0].decode(encoding='utf-8', errors='strict'))
+	def GetAuth(self, request):
+		session = request.getSession().sessionNamespaces
+		if "pwd" in list(session.keys()) and session["pwd"] is not None:
+			return (session["user"], session["pwd"])
 		else:
-			self.mystream.handleCommand(request.args["StreamService"][0])
-		self.mystream.execBegin()
-		self.service = self.mystream.getService()
-		self.nav.record_event.append(self.requestWrite)
-		request.notifyFinish().addCallback(self.close, None)
-		request.notifyFinish().addErrback(self.close, None)
-		self.mystream.clientIP = request.getAllHeaders().get('x-forwarded-for', request.getClientIP())
-		self.mystream.streamIndex = len(streamList)
-		self.mystream.request = weakref.ref(request)
-		streamList.append(self.mystream)
-		self.setStatus(StreamAdapter.EV_BEGIN)
+			return None
 
-		self.timeout_call = reactor.callLater(STREAM_TIMEOUT, self.timeout)
 
-	def timeout(self):
-		if not self._closed:
-			try:
-				req = self.mystream.request()
-				if req:
-					req.finish()
-			except:
-				pass
-			self.close()
+def isMobileBrowser(request):
+	"""
+	Detect if the request is from a mobile browser
+	"""
+	user_agent = request.getHeader('user-agent')
+	if user_agent:
+		user_agent = user_agent.lower()
+		mobile_keywords = ['android', 'iphone', 'ipad', 'ipod', 'mobile', 'webos', 'blackberry', 'windows phone']
+		return any(keyword in user_agent for keyword in mobile_keywords)
+	return False
 
-	def setStatus(self, state):
-		for x in streamStates:
-			try:
-				x(state, self.mystream)
-			except:
-				pass
 
-	def close(self, nothandled1=None, nothandled2=None):
-		if self._closed:
-			return
-		self._closed = True
+def getStream(session, request, m3ufile):
+	sRef = getUrlArg(request, "ref")
+	if sRef != None:
+		if PY3:
+			sRef = unquote(unquote(sRef))
+		else:
+			sRef = unquote(unquote(request.args["ref"][0]).decode('utf-8', 'ignore')).encode('utf-8')
+	else:
+		sRef = ""
 
-		if self.timeout_call and self.timeout_call.active():
-			self.timeout_call.cancel()
+	currentServiceRef = None
+	if m3ufile == "streamcurrent.m3u":
+		currentServiceRef = session.nav.getCurrentlyPlayingServiceReference()
+		sRef = currentServiceRef.toString()
 
+	if sRef.startswith("1:134:"):
+		if currentServiceRef is None:
+			currentServiceRef = session.nav.getCurrentlyPlayingServiceReference()
+		if currentServiceRef is None:
+			currentServiceRef = eServiceReference()
+		ref = getBestPlayableServiceReference(eServiceReference(sRef), currentServiceRef)
+		if ref is None:
+			sRef = ""
+		else:
+			sRef = ref.toString()
+
+	# #EXTINF:-1,%s\n adding back to show service name in programs like VLC
+	progopt = ''
+	name = getUrlArg(request, "name")
+	if name != None:
+		if config.OpenWebif.service_name_for_stream.value:
+			progopt = "#EXTINF:-1,%s\n" % name
+
+	name = "stream"
+	portNumber = config.OpenWebif.streamport.value
+	info = getInfo()
+	model = info["model"]
+	machinebuild = info["machinebuild"]
+	urlparam = '?'
+	if info["imagedistro"] in ('openpli', 'satdreamgr', 'openvision'):
+		urlparam = '&'
+	transcoder_port = None
+	args = ""
+
+	device = getUrlArg(request, "device")
+
+	if fileExists("/dev/bcm_enc0"):
 		try:
-			self.mystream.execEnd()
-		except:
-			pass
-
-		try:
-			self.nav.record_event.remove(self.requestWrite)
-		except:
-			pass
-
-		if self.converter is not None:
+			transcoder_port = int(config.plugins.transcodingsetup.port.value)
+		except Exception:
+			# Transcoding Plugin is not installed or your STB does not support transcoding
+			transcoder_port = None
+		if device == "phone":
+			portNumber = transcoder_port
+		_port = getUrlArg(request, "port")
+		if _port != None:
+			portNumber = _port
+	elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+		# HiSilicon/Xtrend encoders - use standard port with transcoding parameters
+		if device == "phone":
+			portNumber = streamport
+			# Add transcoding parameters to URL
 			try:
-				self.converter.source = None
-			except:
+				bitrate = config.plugins.transcodingsetup.bitrate.value
+				width = config.plugins.transcodingsetup.width.value
+				height = config.plugins.transcodingsetup.height.value
+				aspectratio = config.plugins.transcodingsetup.aspectratio.value
+				interlaced = config.plugins.transcodingsetup.interlaced.value
+				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
+			except Exception:
+				# Fallback to safe defaults
+				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
+
+	if fileExists("/dev/bcm_enc0"):
+		# Broadcom encoders still need URL parameters on their transcoder port
+		if device == "phone":
+			try:
+				bitrate = config.plugins.transcodingsetup.bitrate.value
+				resolution = config.plugins.transcodingsetup.resolution.value
+				(width, height) = tuple(resolution.split('x'))
+				# framerate = config.plugins.transcodingsetup.framerate.value
+				aspectratio = config.plugins.transcodingsetup.aspectratio.value
+				interlaced = config.plugins.transcodingsetup.interlaced.value
+				if fileExists("/proc/stb/encoder/0/vcodec"):
+					vcodec = config.plugins.transcodingsetup.vcodec.value
+					args = "?bitrate=%s__width=%s__height=%s__vcodec=%s__aspectratio=%s__interlaced=%s" % (bitrate, width, height, vcodec, aspectratio, interlaced)
+				else:
+					args = "?bitrate=%s__width=%s__height=%s__aspectratio=%s__interlaced=%s" % (bitrate, width, height, aspectratio, interlaced)
+				args = args.replace('__', urlparam)
+			except Exception:
 				pass
-			self.converter = None
 
-		if self.mystream in streamList:
-			streamList.remove(self.mystream)
+	# When you use EXTVLCOPT:program in a transcoded stream, VLC does not play stream
+	if config.OpenWebif.service_name_for_stream.value and sRef != '' and portNumber != transcoder_port:
+		progopt = "%s#EXTVLCOPT:program=%d\n" % (progopt, int(sRef.split(':')[3], 16))
 
-		self.mystream.request = None
-		self.request = None
+	if config.OpenWebif.auth_for_streaming.value:
+		asession = GetSession()
+		if asession.GetAuth(request) is not None:
+			auth = ':'.join(asession.GetAuth(request)) + "@"
+		else:
+			auth = '-sid:' + ensure_str(asession.GetSID(request)) + "@"
+	else:
+		auth = ''
 
-		self.setStatus(StreamAdapter.EV_STOP)
+	# Build the direct stream URL
+	stream_url = "http://%s%s:%s/%s%s" % (auth, request.getRequestHostname(), portNumber, sRef, args)
 
-	def requestWrite(self, notused1=None, notused2=None):
-		if self._closed:
-			return
+	# For mobile browsers, redirect to HTML5 video player page
+	if isMobileBrowser(request):
+		from six.moves.urllib.parse import quote as url_quote
+		player_url = "/mobile/videoplayer?ref=%s&name=%s" % (url_quote(sRef), url_quote(name) if name else "Stream")
+		if device == "phone":
+			player_url += "&device=phone"
+		request.setResponseCode(302)
+		request.setHeader('Location', player_url)
+		return ""
 
-		try:
-			req = self.mystream.request() if hasattr(self.mystream.request, '__call__') else self.mystream.request
-			if not req:
-				return
+	# For desktop browsers, return M3U playlist
+	response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s\n" % (progopt, stream_url)
+	if config.OpenWebif.playiptvdirect.value:
+		if "http://" in sRef or "https://" in sRef:
+			l = sRef.split(":http")[1]
+			response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true\n%shttp%s\n" % (progopt, l)
+	request.setHeader('Content-Type', 'audio/x-mpegurl')
+	# Note: do not rename the m3u file all the time
+	fname = getUrlArg(request, "fname")
+	if fname != None:
+		request.setHeader('Content-Disposition', 'attachment; filename=%s.%s;' % (fname, 'm3u8'))
+	else:
+		request.setHeader('Content-Disposition', 'attachment; filename=stream.m3u')
+	return response
 
-			if self.converter is None:
-				converter_args = []
-				self.converter = Streaming(converter_args)
-				self.converter.source = self
 
-			text = self.converter.getText()
-			if PY3:
-				req.write(text.encode(encoding='utf-8', errors='strict'))
+def getTS(self, request):
+	file = getUrlArg(request, "file")
+	if file != None:
+		if PY3:
+			filename = unquote(file)
+		else:
+			filename = unquote(file).decode('utf-8', 'ignore').encode('utf-8')
+		if not os.path.exists(filename):
+			return "File '%s' not found" % (filename)
+
+# ServiceReference is not part of filename so look in the '.ts.meta' file
+		sRef = ""
+		progopt = ''
+
+		if os.path.exists(filename + '.meta'):
+			metafile = open(filename + '.meta', "r")
+			name = ''
+			seconds = -1  # unknown duration default
+			line = metafile.readline()  # service ref
+			if line:
+				sRef = eServiceReference(line.strip()).toString()
+			line2 = metafile.readline()  # name
+			if line2:
+				name = line2.strip()
+			line6 = metafile.readline()  # description
+			line6 = metafile.readline()  # recording time
+			line6 = metafile.readline()  # tags
+			line6 = metafile.readline()  # length
+
+			if line6:
+				seconds = float(line6.strip()) / 90000  # In seconds
+
+			if config.OpenWebif.service_name_for_stream.value:
+				progopt = "%s#EXTINF:%d,%s\n" % (progopt, seconds, name)
+
+			metafile.close()
+
+		portNumber = None
+		proto = 'http'
+		info = getInfo()
+		model = info["model"]
+		machinebuild = info["machinebuild"]
+		transcoder_port = None
+		args = ""
+		urlparam = '?'
+		if info["imagedistro"] in ('openpli', 'satdreamgr', 'openvision'):
+			urlparam = '&'
+
+		device = getUrlArg(request, "device")
+
+		if fileExists("/dev/bcm_enc0"):
+			# Broadcom encoder
+			try:
+				transcoder_port = int(config.plugins.transcodingsetup.port.value)
+			except Exception:
+				transcoder_port = None
+			if device == "phone":
+				portNumber = transcoder_port
+			_port = getUrlArg(request, "port")
+			if _port != None:
+				portNumber = _port
+		elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+			# HiSilicon/Xtrend encoder - use standard port with parameters
+			if device == "phone":
+				portNumber = streamport
+			_port = getUrlArg(request, "port")
+			if _port != None:
+				portNumber = _port
+
+		if fileExists("/dev/bcm_enc0"):
+			# Broadcom encoders need URL parameters
+			if device == "phone":
+				try:
+					bitrate = config.plugins.transcodingsetup.bitrate.value
+					resolution = config.plugins.transcodingsetup.resolution.value
+					(width, height) = tuple(resolution.split('x'))
+					aspectratio = config.plugins.transcodingsetup.aspectratio.value
+					interlaced = config.plugins.transcodingsetup.interlaced.value
+					if fileExists("/proc/stb/encoder/0/vcodec"):
+						vcodec = config.plugins.transcodingsetup.vcodec.value
+						args = "?bitrate=%s__width=%s__height=%s__vcodec=%s__aspectratio=%s__interlaced=%s" % (bitrate, width, height, vcodec, aspectratio, interlaced)
+					else:
+						args = "?bitrate=%s__width=%s__height=%s__aspectratio=%s__interlaced=%s" % (bitrate, width, height, aspectratio, interlaced)
+					args = args.replace('__', urlparam)
+				except Exception:
+					pass
+			# Add position parameter to m3u link
+			position = getUrlArg(request, "position")
+			if position != None:
+				args = args + "&position=" + position
+		elif (fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply")) and device == "phone":
+			# HiSilicon/Xtrend - add transcoding parameters like live streams
+			try:
+				bitrate = config.plugins.transcodingsetup.bitrate.value
+				width = config.plugins.transcodingsetup.width.value
+				height = config.plugins.transcodingsetup.height.value
+				aspectratio = config.plugins.transcodingsetup.aspectratio.value
+				interlaced = config.plugins.transcodingsetup.interlaced.value
+				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
+			except Exception:
+				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
+			# Add position parameter if provided
+			position = getUrlArg(request, "position")
+			if position != None:
+				args = args + "&position=" + position
+
+		# When you use EXTVLCOPT:program in a transcoded stream, VLC does not play stream
+		if config.OpenWebif.service_name_for_stream.value and sRef != '' and portNumber != transcoder_port:
+			progopt = "%s#EXTVLCOPT:program=%d\n" % (progopt, int(sRef.split(':')[3], 16))
+
+		if portNumber is None:
+			portNumber = config.OpenWebif.port.value
+			if request.isSecure():
+				portNumber = config.OpenWebif.https_port.value
+				proto = 'https'
+			ourhost = request.getHeader('host')
+			m = re.match('.+\\:(\\d+)$', ourhost)
+			if m is not None:
+				portNumber = m.group(1)
+
+		if config.OpenWebif.auth_for_streaming.value:
+			asession = GetSession()
+			if asession.GetAuth(request) is not None:
+				auth = ':'.join(asession.GetAuth(request)) + "@"
 			else:
-				req.write(text)
-		except:
-			self.close()
+				auth = '-sid:' + ensure_str(asession.GetSID(request)) + "@"
+		else:
+			auth = ''
+
+		# Build the direct stream URL for recorded file
+		stream_url = "%s://%s%s:%s/file?file=%s%s" % (proto, auth, request.getRequestHostname(), portNumber, quote(filename), args)
+
+		# For mobile browsers, redirect directly to the video stream
+		if isMobileBrowser(request):
+			request.setHeader('Content-Type', 'video/mp2t')
+			request.setResponseCode(302)
+			request.setHeader('Location', stream_url)
+			return ""
+
+		# For desktop browsers, return M3U playlist
+		response = "#EXTM3U \n#EXTVLCOPT:http-reconnect=true \n%s%s\n" % (progopt, stream_url)
+		request.setHeader('Content-Type', 'audio/x-mpegurl')
+		request.setHeader('Content-Disposition', 'attachment; filename=recording.m3u')
+		return response
+	else:
+		return "Missing file parameter"
 
 
-class StreamController(resource.Resource):
-	def __init__(self, session, path=""):
-		resource.Resource.__init__(self)
-		self.session = session
+def getStreamSubservices(session, request):
+	services = []
+	currentServiceRef = session.nav.getCurrentlyPlayingServiceReference()
 
-	def render(self, request):
-		StreamAdapter(self.session, request)
-		return server.NOT_DONE_YET
+	# TODO : this will only work if sref = current channel
+	# the DMM webif can also show subservices for other channels like the current
+	# ideas are welcome
+
+	sRef = getUrlArg(request, "sRef")
+	if sRef != None:
+		currentServiceRef = eServiceReference(sRef)
+
+	if currentServiceRef is not None:
+		currentService = session.nav.getCurrentService()
+		subservices = currentService.subServices()
+
+		services.append({
+			"servicereference": currentServiceRef.toString(),
+			"servicename": ServiceReference(currentServiceRef).getServiceName()
+		})
+		if subservices and subservices.getNumberOfSubservices() != 0:
+			n = subservices and subservices.getNumberOfSubservices()
+			z = 0
+			while z < n:
+				sub = subservices.getSubservice(z)
+				services.append({
+					"servicereference": sub.toString(),
+					"servicename": sub.getName()
+				})
+				z += 1
+	else:
+		services.append({
+			"servicereference": "N/A",
+			"servicename": "N/A"
+		})
+
+	return {"services": services}
