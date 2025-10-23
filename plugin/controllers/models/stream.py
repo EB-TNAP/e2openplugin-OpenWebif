@@ -104,23 +104,9 @@ def getStream(session, request, m3ufile):
 		if _port != None:
 			portNumber = _port
 	elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-		# HiSilicon/Xtrend encoders - use standard port with transcoding parameters
-		if device == "phone":
-			portNumber = streamport
-			# Add transcoding parameters to URL
-			try:
-				bitrate = config.plugins.transcodingsetup.bitrate.value
-				width = config.plugins.transcodingsetup.width.value
-				height = config.plugins.transcodingsetup.height.value
-				aspectratio = config.plugins.transcodingsetup.aspectratio.value
-				interlaced = config.plugins.transcodingsetup.interlaced.value
-				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
-			except Exception:
-				# Fallback to safe defaults
-				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
+		transcoder_port = portNumber
 
-	if fileExists("/dev/bcm_enc0"):
-		# Broadcom encoders still need URL parameters on their transcoder port
+	if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
 		if device == "phone":
 			try:
 				bitrate = config.plugins.transcodingsetup.bitrate.value
@@ -230,32 +216,25 @@ def getTS(self, request):
 
 		device = getUrlArg(request, "device")
 
-		if fileExists("/dev/bcm_enc0"):
-			# Broadcom encoder
+		if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
 			try:
 				transcoder_port = int(config.plugins.transcodingsetup.port.value)
 			except Exception:
+				# Transcoding Plugin is not installed or your STB does not support transcoding
 				transcoder_port = None
 			if device == "phone":
 				portNumber = transcoder_port
 			_port = getUrlArg(request, "port")
 			if _port != None:
 				portNumber = _port
-		elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
-			# HiSilicon/Xtrend encoder - use standard port with parameters
-			if device == "phone":
-				portNumber = streamport
-			_port = getUrlArg(request, "port")
-			if _port != None:
-				portNumber = _port
 
-		if fileExists("/dev/bcm_enc0"):
-			# Broadcom encoders need URL parameters
+		if fileExists("/dev/bcm_enc0") or fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
 			if device == "phone":
 				try:
 					bitrate = config.plugins.transcodingsetup.bitrate.value
 					resolution = config.plugins.transcodingsetup.resolution.value
 					(width, height) = tuple(resolution.split('x'))
+					# framerate = config.plugins.transcodingsetup.framerate.value
 					aspectratio = config.plugins.transcodingsetup.aspectratio.value
 					interlaced = config.plugins.transcodingsetup.interlaced.value
 					if fileExists("/proc/stb/encoder/0/vcodec"):
@@ -267,21 +246,6 @@ def getTS(self, request):
 				except Exception:
 					pass
 			# Add position parameter to m3u link
-			position = getUrlArg(request, "position")
-			if position != None:
-				args = args + "&position=" + position
-		elif (fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply")) and device == "phone":
-			# HiSilicon/Xtrend - add transcoding parameters like live streams
-			try:
-				bitrate = config.plugins.transcodingsetup.bitrate.value
-				width = config.plugins.transcodingsetup.width.value
-				height = config.plugins.transcodingsetup.height.value
-				aspectratio = config.plugins.transcodingsetup.aspectratio.value
-				interlaced = config.plugins.transcodingsetup.interlaced.value
-				args = "?bitrate=%d?width=%d?height=%d?aspectratio=%d?interlaced=%d" % (bitrate, width, height, aspectratio, interlaced)
-			except Exception:
-				args = "?bitrate=2500000?width=1280?height=720?aspectratio=0?interlaced=0"
-			# Add position parameter if provided
 			position = getUrlArg(request, "position")
 			if position != None:
 				args = args + "&position=" + position
