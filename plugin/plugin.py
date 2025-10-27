@@ -294,7 +294,7 @@ class OpenWebifConfig(Screen, ConfigListScreen):
 				self.list.append((_("Enable access from VPNs"), config.OpenWebif.vpn_access))
 			self.list.append((_("Enable Parental Control"), config.OpenWebif.parentalenabled))
 			self.list.append((_("Streaming port"), config.OpenWebif.streamport))
-			self.list.append((_("Transcoding port"), config.OpenWebif.transcodeport))
+			#self.list.append((_("Transcoding port"), config.OpenWebif.transcodeport))
 			self.list.append((_("Add service name to stream information"), config.OpenWebif.service_name_for_stream))
 			if imagedistro in ("VTi-Team Image"):
 				self.list.append((_("Character encoding for EPG data"), config.OpenWebif.epg_encoding))
