@@ -142,6 +142,8 @@ class MobileController(BaseController):
 		"""
 		from six.moves.urllib.parse import unquote
 		from Plugins.Extensions.OpenWebif.controllers.models.stream import GetSession
+		from Plugins.Extensions.OpenWebif.controllers.models.info import getInfo
+		import os
 
 		sRef = getUrlArg(request, "ref")
 		if sRef:
@@ -153,20 +155,66 @@ class MobileController(BaseController):
 
 		# Build stream URL
 		portNumber = config.OpenWebif.streamport.value
+		transcoder_port = None
+		args = ""
+		transcoding_enabled = False
+
+		# Get image info for URL parameter format
+		info = getInfo()
+		urlparam = '?'
+		if info["imagedistro"] in ('openpli', 'satdreamgr', 'openvision'):
+			urlparam = '&'
 
 		# Check for transcoding
 		device = getUrlArg(request, "device")
-		args = ""
 
 		try:
 			from Tools.Directories import fileExists
+			# Broadcom hardware encoder
 			if fileExists("/dev/bcm_enc0"):
 				try:
 					transcoder_port = int(config.plugins.transcodingsetup.port.value)
-					if device == "phone":
-						portNumber = transcoder_port
-				except:
-					pass
+				except Exception:
+					transcoder_port = None
+				if device == "phone" and transcoder_port:
+					portNumber = transcoder_port
+					transcoding_enabled = True
+			# HiSilicon/encoder0 hardware encoders (SF8008, etc)
+			elif fileExists("/dev/encoder0") or fileExists("/proc/stb/encoder/0/apply"):
+				transcoder_port = portNumber
+				if device == "phone":
+					# Activate hardware encoder via proc interface
+					try:
+						# Get transcoding settings from config
+						bitrate = str(config.plugins.transcodingsetup.bitrate.value)
+						width = str(config.plugins.transcodingsetup.width.value)
+						height = str(config.plugins.transcodingsetup.height.value)
+						aspectratio = str(config.plugins.transcodingsetup.aspectratio.value)
+						vcodec = str(config.plugins.transcodingsetup.video_codec.value)
+						acodec = str(config.plugins.transcodingsetup.audio_codec.value)
+
+						# Apply settings to hardware encoder
+						encoder_base = "/proc/stb/encoder/0/"
+						if os.path.exists(encoder_base + "bitrate"):
+							open(encoder_base + "bitrate", "w").write(bitrate)
+						if os.path.exists(encoder_base + "width"):
+							open(encoder_base + "width", "w").write(width)
+						if os.path.exists(encoder_base + "height"):
+							open(encoder_base + "height", "w").write(height)
+						if os.path.exists(encoder_base + "aspectratio"):
+							open(encoder_base + "aspectratio", "w").write(aspectratio)
+						if os.path.exists(encoder_base + "vcodec"):
+							open(encoder_base + "vcodec", "w").write(vcodec)
+						if os.path.exists(encoder_base + "acodec"):
+							open(encoder_base + "acodec", "w").write(acodec)
+						# Activate encoder
+						if os.path.exists(encoder_base + "apply"):
+							open(encoder_base + "apply", "w").write("1")
+
+						transcoding_enabled = True
+					except Exception as e:
+						print("[OpenWebif] Failed to activate encoder:", str(e))
+						pass
 		except:
 			pass
 
@@ -184,5 +232,6 @@ class MobileController(BaseController):
 
 		return {
 			"streamurl": streamurl,
-			"name": name
+			"name": name,
+			"transcoding": transcoding_enabled
 		}
