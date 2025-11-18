@@ -1,5 +1,4 @@
 #from Plugins.Extensions.OpenWebif.controllers.i18n import tstrings
-<!DOCTYPE html>
 <html>
 <head>
 <title>OpenWebif - Stream Player</title>
@@ -11,375 +10,220 @@ body {
 	margin: 0;
 	padding: 0;
 	background: #000;
-	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-	color: #fff;
+	font-family: Arial, sans-serif;
 }
-.container {
-	padding: 20px;
-	max-width: 600px;
-	margin: 0 auto;
+.video-container {
+	position: relative;
+	width: 100%;
+	height: 100vh;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
 }
-.header {
+.controls {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
 	background: rgba(0,0,0,0.7);
-	padding: 15px;
+	color: #fff;
+	padding: 10px;
 	display: flex;
 	justify-content: space-between;
 	align-items: center;
-	border-bottom: 2px solid #333;
-	margin-bottom: 20px;
+	z-index: 100;
 }
 .channel-name {
-	font-size: 18px;
+	font-size: 16px;
 	font-weight: bold;
-	color: #4a9eff;
 }
 .back-button {
 	background: #444;
 	color: #fff;
 	border: none;
-	padding: 10px 20px;
-	border-radius: 6px;
+	padding: 8px 16px;
+	border-radius: 4px;
 	text-decoration: none;
 	font-size: 14px;
-	display: inline-block;
 }
-.back-button:active {
-	background: #666;
-}
-.section {
-	margin-bottom: 30px;
-}
-.section-title {
-	font-size: 16px;
-	color: #aaa;
-	margin-bottom: 15px;
-	text-transform: uppercase;
-	letter-spacing: 1px;
+.player-chooser {
+	display: none;
+	padding: 20px;
+	text-align: center;
+	color: #fff;
 }
 .player-grid {
 	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-	gap: 12px;
-	margin-bottom: 20px;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 15px;
+	margin: 20px auto;
+	max-width: 500px;
 }
 .player-button {
 	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 	border: 2px solid #888;
-	padding: 20px 15px;
-	border-radius: 12px;
+	padding: 20px;
+	border-radius: 10px;
 	text-align: center;
 	cursor: pointer;
-	transition: all 0.3s ease;
 	text-decoration: none;
 	display: block;
 	color: #fff;
+	font-size: 16px;
+	font-weight: bold;
+	transition: all 0.2s;
 }
 .player-button:active {
 	transform: scale(0.95);
-	background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
-}
-.player-button.native {
-	background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-}
-.player-name {
-	font-size: 16px;
-	font-weight: 600;
-	margin-bottom: 6px;
 }
 .player-note {
 	font-size: 12px;
-	color: rgba(255,255,255,0.7);
+	margin-top: 5px;
+	opacity: 0.8;
 }
-.info-box {
-	background: rgba(66, 135, 245, 0.15);
-	border-left: 4px solid #4287f5;
-	padding: 15px;
-	border-radius: 6px;
-	margin-bottom: 20px;
-	font-size: 14px;
-	line-height: 1.6;
-}
-.warning-box {
-	background: rgba(255, 165, 0, 0.15);
-	border-left: 4px solid #ffa500;
-	padding: 15px;
-	border-radius: 6px;
-	margin-bottom: 20px;
-	font-size: 14px;
-	line-height: 1.6;
-}
-.stream-url {
+.stream-url-box {
 	background: #1a1a1a;
-	padding: 12px;
-	border-radius: 6px;
-	font-family: 'Courier New', monospace;
-	font-size: 11px;
-	word-break: break-all;
-	margin-top: 15px;
+	padding: 15px;
+	margin: 20px;
+	border-radius: 5px;
 	border: 1px solid #333;
 }
-.copy-button {
+.stream-url {
+	font-family: monospace;
+	font-size: 11px;
+	word-break: break-all;
+	color: #4a9eff;
+}
+.copy-btn {
 	background: #4287f5;
 	border: none;
-	padding: 8px 16px;
+	padding: 10px 20px;
 	border-radius: 4px;
 	color: #fff;
 	margin-top: 10px;
-	font-size: 13px;
 	cursor: pointer;
-}
-.copy-button:active {
-	background: #357abd;
-}
-.fallback-section {
-	margin-top: 30px;
-	padding-top: 30px;
-	border-top: 1px solid #333;
-}
-.copy-feedback {
-	color: #48bb78;
-	margin-top: 10px;
-	display: none;
-	font-size: 14px;
 }
 </style>
 </head>
 <body>
-<div class="header">
-	<span class="channel-name">$name</span>
-	<a href="javascript:history.back()" class="back-button">$tstrings['back']</a>
-</div>
-
-<div class="container">
-	<div class="info-box">
-		<strong>Choose Your Player</strong><br>
-		Tap a player button below to open the stream. Different players support different codecs - if one doesn't work, try another!
+<div class="video-container">
+	<div class="controls">
+		<span class="channel-name">$name</span>
+		<a href="javascript:history.back()" class="back-button">$tstrings['back']</a>
 	</div>
 
-	<div class="section">
-		<div class="section-title">Recommended Players</div>
+	<div id="android-loader" style="padding: 20px; text-align: center;">
+		<h3 style="color: #fff; margin-bottom: 20px;">Opening stream...</h3>
+		<p style="color: #aaa;">If the app chooser doesn't appear, <a id="retry-link" href="#" style="color: #0066cc;">click here</a></p>
+	</div>
+
+	<div id="ios-chooser" class="player-chooser">
+		<h3 style="margin-bottom: 10px;">Choose Your Player</h3>
+		<p style="color: #aaa; margin-bottom: 20px;">Select a video player app to open the stream</p>
+
 		<div class="player-grid">
-			<a href="#" class="player-button" id="vlc-button">
-				<div class="player-name">VLC</div>
+			<a href="#" class="player-button" data-player="vlc">
+				VLC
 				<div class="player-note">Most formats</div>
 			</a>
-
-			<a href="#" class="player-button" id="infuse-button">
-				<div class="player-name">Infuse</div>
+			<a href="#" class="player-button" data-player="infuse">
+				Infuse
 				<div class="player-note">HLS/IPTV</div>
 			</a>
-
-			<a href="#" class="player-button" id="nplayer-button">
-				<div class="player-name">nPlayer</div>
+			<a href="#" class="player-button" data-player="nplayer">
+				nPlayer
 				<div class="player-note">All codecs</div>
 			</a>
-
-			<a href="#" class="player-button" id="oplayer-button">
-				<div class="player-name">OPlayer</div>
+			<a href="#" class="player-button" data-player="oplayer">
+				OPlayer
 				<div class="player-note">Universal</div>
 			</a>
 		</div>
 
-		<div class="player-grid">
-			<a href="#" class="player-button" id="kodi-button">
-				<div class="player-name">Kodi</div>
-				<div class="player-note">Media center</div>
-			</a>
-
-			<a href="#" class="player-button" id="movieplayer-button">
-				<div class="player-name">MoviePlayer</div>
-				<div class="player-note">Streaming</div>
-			</a>
-
-			<a href="#" class="player-button" id="iina-button">
-				<div class="player-name">IINA</div>
-				<div class="player-note">Mac/iPad</div>
-			</a>
-
-			<a href="#" class="player-button native" id="safari-button">
-				<div class="player-name">Safari</div>
-				<div class="player-note">HLS only</div>
-			</a>
-		</div>
-	</div>
-
-	<div class="fallback-section">
-		<div class="section-title">Manual Stream URL</div>
-		<div class="warning-box">
-			If the buttons above don't work, copy the stream URL below and paste it into your player app manually.
-		</div>
-		<div class="stream-url" id="stream-url">$streamurl</div>
-		<button class="copy-button" id="copy-button">Copy Stream URL</button>
-		<div class="copy-feedback" id="copy-feedback">Copied to clipboard!</div>
-	</div>
-
-	<div class="fallback-section">
-		<div class="section-title">Troubleshooting</div>
-		<div style="font-size: 13px; line-height: 1.8; color: #aaa;">
-			<strong style="color: #fff;">Video not playing?</strong><br>
-			- Try a different player - each supports different codecs<br>
-			- For music channels, try VLC, nPlayer, or OPlayer<br>
-			- For satellite FTA streams, nPlayer usually works best<br>
-			- If all else fails, copy the URL and paste in your favorite player<br>
-			<br>
-			<strong style="color: #fff;">Player not installed?</strong><br>
-			- Download from the App Store: VLC, Infuse, nPlayer, or OPlayer<br>
-			- Free options: VLC (free), Infuse (free version available)<br>
+		<div class="stream-url-box">
+			<p style="color: #aaa; margin-bottom: 10px;">Or copy the stream URL:</p>
+			<div class="stream-url">$streamurl</div>
+			<button class="copy-btn" id="copy-btn">Copy URL</button>
+			<div id="copy-msg" style="color: #48bb78; margin-top: 10px; display: none;">Copied!</div>
 		</div>
 	</div>
 </div>
 
 <script>
 var streamUrl = '$streamurl';
+var isIOS = /(iPhone|iPad|iPod)/i.test(navigator.userAgent);
+var isAndroid = /android/i.test(navigator.userAgent);
 
-// URL schemes for different iOS players
-var players = {
-	vlc: {
-		scheme: 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(streamUrl),
-		appstore: 'https://apps.apple.com/app/vlc-media-player/id650377962'
-	},
-	infuse: {
-		scheme: 'infuse://x-callback-url/play?url=' + encodeURIComponent(streamUrl),
-		appstore: 'https://apps.apple.com/app/infuse-video-player/id1136220934'
-	},
-	nplayer: {
-		scheme: 'nplayer-' + streamUrl,
-		appstore: 'https://apps.apple.com/app/nplayer/id1116905928'
-	},
-	oplayer: {
-		scheme: 'oplayer://' + streamUrl.replace('http://', '').replace('https://', ''),
-		appstore: 'https://apps.apple.com/app/oplayer-video-player/id344784375'
-	},
-	kodi: {
-		scheme: 'kodi://play/' + streamUrl,
-		appstore: 'https://apps.apple.com/app/official-kodi-remote/id520480364'
-	},
-	movieplayer: {
-		scheme: 'movieplayer://' + streamUrl,
-		appstore: 'https://apps.apple.com/app/movie-player-pro/id446150923'
-	},
-	iina: {
-		scheme: 'iina://weblink?url=' + encodeURIComponent(streamUrl),
-		appstore: 'https://iina.io/'
-	},
-	safari: {
-		scheme: streamUrl,
-		appstore: null
-	}
+// iOS player URL schemes
+var iosPlayers = {
+	vlc: 'vlc-x-callback://x-callback-url/stream?url=' + encodeURIComponent(streamUrl),
+	infuse: 'infuse://x-callback-url/play?url=' + encodeURIComponent(streamUrl),
+	nplayer: 'nplayer-' + streamUrl,
+	oplayer: 'oplayer://' + streamUrl.replace('http://', '').replace('https://', '')
 };
 
-// Try to open player, fallback to App Store if not installed
-function tryPlayer(playerKey) {
-	var player = players[playerKey];
-	if (!player) return;
+if (isAndroid) {
+	// Android: Use intent to trigger system app chooser (ORIGINAL BEHAVIOR)
+	function openAndroidIntent() {
+		window.location.href = 'intent:' + streamUrl + '#Intent;type=video/*;action=android.intent.action.VIEW;end';
+	}
 
-	console.log('Attempting to open: ' + playerKey);
+	// Auto-open after short delay
+	setTimeout(openAndroidIntent, 500);
 
-	// Try to open the player
-	window.location.href = player.scheme;
+	// Manual retry
+	document.getElementById('retry-link').addEventListener('click', function(e) {
+		e.preventDefault();
+		openAndroidIntent();
+	});
 
-	// On iOS, if the app is not installed, the URL scheme will fail silently
-	// After a short delay, offer to go to App Store
-	if (player.appstore && playerKey !== 'safari') {
-		setTimeout(function() {
-			var goToStore = confirm(
-				playerKey.toUpperCase() + ' does not appear to be installed.\n\n' +
-				'Would you like to download it from the App Store?'
-			);
-			if (goToStore) {
-				window.location.href = player.appstore;
+} else if (isIOS) {
+	// iOS: Show player chooser
+	document.getElementById('android-loader').style.display = 'none';
+	document.getElementById('ios-chooser').style.display = 'block';
+
+	// Handle player button clicks
+	var buttons = document.querySelectorAll('.player-button');
+	buttons.forEach(function(btn) {
+		btn.addEventListener('click', function(e) {
+			e.preventDefault();
+			var player = this.getAttribute('data-player');
+			if (iosPlayers[player]) {
+				window.location.href = iosPlayers[player];
 			}
-		}, 2000);
-	}
-}
-
-// Attach click handlers
-document.getElementById('vlc-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('vlc');
-});
-
-document.getElementById('infuse-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('infuse');
-});
-
-document.getElementById('nplayer-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('nplayer');
-});
-
-document.getElementById('oplayer-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('oplayer');
-});
-
-document.getElementById('kodi-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('kodi');
-});
-
-document.getElementById('movieplayer-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('movieplayer');
-});
-
-document.getElementById('iina-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('iina');
-});
-
-document.getElementById('safari-button').addEventListener('click', function(e) {
-	e.preventDefault();
-	tryPlayer('safari');
-});
-
-// Copy to clipboard functionality
-document.getElementById('copy-button').addEventListener('click', function() {
-	// Modern clipboard API
-	if (navigator.clipboard && navigator.clipboard.writeText) {
-		navigator.clipboard.writeText(streamUrl).then(function() {
-			showCopyFeedback();
-		}).catch(function(err) {
-			// Fallback for older browsers
-			fallbackCopy();
 		});
-	} else {
-		fallbackCopy();
-	}
-});
+	});
 
-function fallbackCopy() {
-	// Create temporary textarea
-	var textarea = document.createElement('textarea');
-	textarea.value = streamUrl;
-	textarea.style.position = 'fixed';
-	textarea.style.opacity = 0;
-	document.body.appendChild(textarea);
-	textarea.select();
+	// Copy URL functionality
+	document.getElementById('copy-btn').addEventListener('click', function() {
+		if (navigator.clipboard && navigator.clipboard.writeText) {
+			navigator.clipboard.writeText(streamUrl).then(function() {
+				document.getElementById('copy-msg').style.display = 'block';
+				setTimeout(function() {
+					document.getElementById('copy-msg').style.display = 'none';
+				}, 2000);
+			});
+		} else {
+			// Fallback
+			var textarea = document.createElement('textarea');
+			textarea.value = streamUrl;
+			textarea.style.position = 'fixed';
+			textarea.style.opacity = 0;
+			document.body.appendChild(textarea);
+			textarea.select();
+			document.execCommand('copy');
+			document.body.removeChild(textarea);
+			document.getElementById('copy-msg').style.display = 'block';
+			setTimeout(function() {
+				document.getElementById('copy-msg').style.display = 'none';
+			}, 2000);
+		}
+	});
 
-	try {
-		document.execCommand('copy');
-		showCopyFeedback();
-	} catch (err) {
-		alert('Copy failed. Please copy manually:\n\n' + streamUrl);
-	}
-
-	document.body.removeChild(textarea);
-}
-
-function showCopyFeedback() {
-	var feedback = document.getElementById('copy-feedback');
-	feedback.style.display = 'block';
-	setTimeout(function() {
-		feedback.style.display = 'none';
-	}, 3000);
-}
-
-// Auto-detect if on Android and redirect to Android intent
-if (/android/i.test(navigator.userAgent)) {
-	console.log('Android detected, using intent');
-	window.location.href = 'intent:' + streamUrl + '#Intent;type=video/*;action=android.intent.action.VIEW;end';
+} else {
+	// Desktop: Direct link
+	window.location.href = streamUrl;
 }
 </script>
 </body>
