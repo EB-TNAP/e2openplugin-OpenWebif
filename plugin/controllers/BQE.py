@@ -271,7 +271,7 @@ class BQEWebController(BaseController):
 				sref = item[0].toString()
 				serviceslist = serviceHandler.list(eServiceReference(sref))
 				sfulllist = serviceslist and serviceslist.getContent("RN", True)
-				for sitem in sfulllist:
+				for sitem in (sfulllist or []):
 					sref = sitem[0].toString()
 					hs = (int(sref.split(":")[1]) & 512)
 					sp = (sref[:7] == '1:832:D')
@@ -308,7 +308,7 @@ class BQEWebController(BaseController):
 						# get members of group
 						gserviceslist = serviceHandler.list(eServiceReference(sref))
 						gfulllist = gserviceslist and gserviceslist.getContent("RN", True)
-						for gitem in gfulllist:
+						for gitem in (gfulllist or []):
 							gservice = {}
 							gservice['servicereference'] = gitem[0].toString()
 							gservice['servicename'] = gitem[1].replace('<', '&lt;').replace('>', '&gt;')
