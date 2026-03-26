@@ -77,18 +77,22 @@ def getIPTVLink(ref):
 
 def filterName(name, encode=True):
 	if name is not None:
-		name = six.ensure_str(removeBadChars(six.ensure_binary(name)))
+		name = six.ensure_str(removeBadChars(six.ensure_binary(name)), encoding='utf-8', errors='replace')
 		if encode is True:
 			return html_escape(name, quote=True)
 	return name
 
 
 def removeBadChars(val):
-	return val.replace(b'\x1a', b'').replace(b'\xc2\x86', b'').replace(b'\xc2\x87', b'').replace(b'\xc2\x8a', b'')
+	# Remove known enigma2 control sequences, then sanitize any remaining invalid UTF-8
+	val = val.replace(b'\x1a', b'').replace(b'\xc2\x86', b'').replace(b'\xc2\x87', b'').replace(b'\xc2\x8a', b'')
+	return val.decode('utf-8', errors='replace').encode('utf-8')
 
 
 def convertUnicode(val):
 	if PY3:
+		if isinstance(val, bytes):
+			return val.decode('utf-8', errors='replace')
 		return val
 	else:
 		return six.text_type(val, 'utf_8', errors='ignore').encode('utf_8', 'ignore')
@@ -341,9 +345,13 @@ def getBouquets(stype):
 		s_type = service_types_radio
 		s_type2 = "bouquets.radio"
 	serviceHandler = eServiceCenter.getInstance()
-	services = serviceHandler.list(eServiceReference('%s FROM BOUQUET "%s" ORDER BY bouquet' % (s_type, s_type2)))
-	bouquets = services and services.getContent("SN", True)
-	bouquets = removeHiddenBouquets(bouquets)
+	try:
+		services = serviceHandler.list(eServiceReference('%s FROM BOUQUET "%s" ORDER BY bouquet' % (s_type, s_type2)))
+		bouquets = services and services.getContent("SN", True)
+	except Exception as e:
+		print("[OpenWebif] getBouquets error reading %s: %s" % (s_type2, str(e)))
+		bouquets = []
+	bouquets = removeHiddenBouquets(bouquets or [])
 	return {"bouquets": bouquets}
 
 
@@ -575,8 +583,12 @@ def getServices(sRef, showAll=True, showHidden=False, pos=0, showProviders=False
 			for sitem in slist:
 				allproviders[sitem[0]] = provider[1]
 
-	bqservices = serviceHandler.list(eServiceReference(sRef))
-	slist = bqservices and bqservices.getContent("CN" if removeNameFromsref else "SN", True)
+	try:
+		bqservices = serviceHandler.list(eServiceReference(sRef))
+		slist = bqservices and bqservices.getContent("CN" if removeNameFromsref else "SN", True)
+	except Exception as e:
+		print("[OpenWebif] getServices error reading %s: %s" % (sRef, str(e)))
+		slist = []
 
 	oPos = 0
 	for sitem in slist:
