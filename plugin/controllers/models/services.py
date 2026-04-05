@@ -597,7 +597,7 @@ def getServices(sRef, showAll=True, showHidden=False, pos=0, showProviders=False
 		if CalcPos and 'userbouquet' in sref:
 			serviceslist = serviceHandler.list(eServiceReference(sref))
 			sfulllist = serviceslist and serviceslist.getContent("C", True)
-			for sref in sfulllist:
+			for sref in (sfulllist or []):
 				flags = int(sref.split(":")[1])
 				hs = flags & 512  # eServiceReference.isInvisible
 				sp = flags & 256  # eServiceReference.isNumberedMarker
@@ -1409,7 +1409,7 @@ def getServiceRef(name, searchinBouquetsOnly=False, bRef=None):
 		for bouquet in bouquets:
 			serviceslist = serviceHandler.list(eServiceReference(bouquet[0]))
 			sfulllist = serviceslist and serviceslist.getContent("SN", True)
-			for sv in sfulllist:
+			for sv in (sfulllist or []):
 				if sv[1] == name:
 					return {
 						"result": True,
@@ -1420,7 +1420,7 @@ def getServiceRef(name, searchinBouquetsOnly=False, bRef=None):
 		refstr = '%s ORDER BY name' % (service_types_tv)
 		serviceslist = serviceHandler.list(eServiceReference(refstr))
 		sfulllist = serviceslist and serviceslist.getContent("SN", True)
-		for sv in sfulllist:
+		for sv in (sfulllist or []):
 			if sv[1] == name:
 				return {
 					"result": True,
