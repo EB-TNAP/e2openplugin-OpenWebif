@@ -472,7 +472,7 @@
 				$('#btn-marker-add').prop( 'disabled', state );
 				$('#btn-spacer-add').prop( 'disabled', state );
 
-				state = item.length != 1 || item.data('ismarker') != 1;
+				state = item.length != 1 || item.data('ismarker') == 2;
 				$('#btn-marker-group-rename').prop( "disabled", state );
 			},
 
@@ -606,22 +606,19 @@
 				}
 			},
 
-			// Callback function for right panel rename marker button
-			// At the moment only markers will be renamed. Prompts for new marker name.
+			// Callback function for right panel rename button
+			// Renames channels, markers, and groups (not spacers).
 			renameMarkerGroup: function () {
-				// rename marker or group
 				var item = $('#bqs li.ui-selected');
 				if (item.length !== 1) {
 					return;
 				}
-
-				// TODO : rename group
-				if (item.data('ismarker') == 0) {
+				if (item.data('ismarker') == 2) {
 					return;
 				}
-			
+
 				var pos = item.index();
-				var sname = item.text();
+				var sname = item.text().replace(/^\d+ - /, '');
 				var sref = item.data('sref');
 				var bref = $('#bql li.ui-selected').data('sref');
 				var dstref = $('#bqs li.ui-selected').next().data('sref') || '';

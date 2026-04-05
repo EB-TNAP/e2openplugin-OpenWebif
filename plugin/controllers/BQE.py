@@ -39,6 +39,55 @@ service_types_tv = '1:7:1:0:0:0:0:0:0:0:(type == 1) || (type == 17) || (type == 
 service_types_radio = '1:7:2:0:0:0:0:0:0:0:(type == 2) || (type == 10)'
 
 
+def _parse_bouquet_fallback(sRef):
+	"""Read a bouquet file directly when enigma2's getContent raises (e.g. invalid UTF-8 in a service name).
+	Returns a list of (eServiceReference, name_str) tuples, same shape as getContent("RN", True)."""
+	if 'FROM BOUQUET "' not in sRef:
+		return []
+	try:
+		start = sRef.index('FROM BOUQUET "') + 14
+		end = sRef.index('"', start)
+		filename = sRef[start:end]
+	except ValueError:
+		return []
+	filepath = os.path.join("/etc/enigma2", filename)
+	if not os.path.isfile(filepath):
+		return []
+	try:
+		with open(filepath, "r", encoding="utf-8", errors="replace") as fh:
+			lines = fh.readlines()
+	except Exception:
+		return []
+	result = []
+	pending = None
+	for line in lines:
+		line = line.strip()
+		if line.startswith("#SERVICE "):
+			if pending is not None:
+				parts = pending.split(":")
+				name = ":".join(parts[10:]) if len(parts) > 10 else ""
+				try:
+					result.append((eServiceReference(pending), name))
+				except Exception:
+					pass
+			pending = line[9:]
+		elif line.startswith("#DESCRIPTION ") and pending is not None:
+			name = line[13:]
+			try:
+				result.append((eServiceReference(pending), name))
+			except Exception:
+				pass
+			pending = None
+	if pending is not None:
+		parts = pending.split(":")
+		name = ":".join(parts[10:]) if len(parts) > 10 else ""
+		try:
+			result.append((eServiceReference(pending), name))
+		except Exception:
+			pass
+	return result
+
+
 class BQEWebController(BaseController):
 	def __init__(self, session, path=""):
 		BaseController.__init__(self, path=path, session=session)
@@ -261,16 +310,22 @@ class BQEWebController(BaseController):
 
 		serviceHandler = eServiceCenter.getInstance()
 		serviceslist = serviceHandler.list(eServiceReference(sRef))
-		fulllist = serviceslist and serviceslist.getContent("RN", True)
+		try:
+			fulllist = serviceslist and serviceslist.getContent("RN", True)
+		except Exception:
+			fulllist = _parse_bouquet_fallback(sRef)
 
 		pos = 0
 		oPos = 0
-		for item in fulllist:
+		for item in (fulllist or []):
 			oldoPos = oPos
 			if CalcPos:
 				sref = item[0].toString()
 				serviceslist = serviceHandler.list(eServiceReference(sref))
-				sfulllist = serviceslist and serviceslist.getContent("RN", True)
+				try:
+					sfulllist = serviceslist and serviceslist.getContent("RN", True)
+				except Exception:
+					sfulllist = _parse_bouquet_fallback(sref)
 				for sitem in (sfulllist or []):
 					sref = sitem[0].toString()
 					hs = (int(sref.split(":")[1]) & 512)
@@ -307,7 +362,10 @@ class BQEWebController(BaseController):
 						service['isgroup'] = '1'
 						# get members of group
 						gserviceslist = serviceHandler.list(eServiceReference(sref))
-						gfulllist = gserviceslist and gserviceslist.getContent("RN", True)
+						try:
+							gfulllist = gserviceslist and gserviceslist.getContent("RN", True)
+						except Exception:
+							gfulllist = _parse_bouquet_fallback(sref)
 						for gitem in (gfulllist or []):
 							gservice = {}
 							gservice['servicereference'] = gitem[0].toString()
