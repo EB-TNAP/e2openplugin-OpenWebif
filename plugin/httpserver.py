@@ -480,9 +480,30 @@ class AuthResource(resource.Resource):
 				return False
 
 		# Password validation
-		from crypt import crypt
+		# crypt and spwd were removed in Python 3.13; use passlib + /etc/shadow fallback
+		try:
+			from crypt import crypt as _crypt_func  # noqa: PLC0415
+			def _verify_password(passwd, hashed):
+				return _crypt_func(passwd, hashed) == hashed
+		except ImportError:
+			from passlib.context import CryptContext  # noqa: PLC0415
+			_pwd_ctx = CryptContext(schemes=["sha512_crypt", "sha256_crypt", "md5_crypt", "des_crypt"])
+
+			def _verify_password(passwd, hashed):
+				try:
+					return _pwd_ctx.verify(passwd, hashed)
+				except Exception:
+					return False
+
+		def _getspnam(username):
+			with open('/etc/shadow', 'r') as f:  # nosec
+				for line in f:
+					parts = line.strip().split(':')
+					if len(parts) >= 2 and parts[0] == username:
+						return parts
+			raise KeyError(username)
+
 		from pwd import getpwnam
-		from spwd import getspnam
 		cpass = None
 		try:
 			cpass = getpwnam(user)[1]
@@ -495,7 +516,7 @@ class AuthResource(resource.Resource):
 		if cpass:
 			if cpass == 'x' or cpass == '*':
 				try:
-					cpass = getspnam(user)[1]
+					cpass = _getspnam(user)[1]
 				except:  # nosec # noqa: E722
 					# Shadow password not accessible
 					if BRUTEFORCE_PROTECTION_AVAILABLE:
@@ -503,7 +524,7 @@ class AuthResource(resource.Resource):
 					return False
 
 			# Check if password matches
-			if crypt(passwd, cpass) == cpass:
+			if _verify_password(passwd, cpass):
 				# Successful login - clear failed attempts for this IP
 				if BRUTEFORCE_PROTECTION_AVAILABLE:
 					bruteforce_protection.record_successful_login(peer, user)
