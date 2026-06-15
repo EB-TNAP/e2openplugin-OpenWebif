@@ -40,6 +40,26 @@ from Components.Network import iNetwork
 import os
 import ipaddress
 import six
+
+# pyOpenSSL 26.x forbids mutating an SSL.Context after a Connection has been created
+# from it. Twisted 25.x calls set_alpn_select_callback() per-connection via
+# _applyProtocolNegotiation(), which hits that guard and raises ValueError, leaving
+# _tlsConnection=None and dropping every HTTPS connection silently. Patch to catch
+# the ValueError so the TLS handshake proceeds normally (HTTP/1.1 only, no HTTP/2).
+try:
+	from twisted.protocols.tls import TLSMemoryBIOFactory as _TLSFactory
+	_orig_applyPN = _TLSFactory._applyProtocolNegotiation
+
+	def _patched_applyProtocolNegotiation(self, connection):
+		try:
+			_orig_applyPN(self, connection)
+		except ValueError:
+			pass
+
+	_TLSFactory._applyProtocolNegotiation = _patched_applyProtocolNegotiation
+	print("[OpenWebif] Applied pyOpenSSL 26.x ALPN compatibility patch")
+except Exception as _e:
+	print("[OpenWebif] Could not apply ALPN patch:", _e)
 # Python 3.12+ compatibility: imp module removed, use importlib
 try:
 	import importlib.util
@@ -275,6 +295,7 @@ def HttpdStart(session):
 
 				sslroot = AuthResource(session, temproot)
 				sslsite = server.Site(sslroot)
+				sslsite.displayTracebacks = config.OpenWebif.displayTracebacks.value
 
 				if has_ipv6 and fileExists('/proc/net/if_inet6') and version.major >= 12:
 					# use ipv6
@@ -479,21 +500,98 @@ class AuthResource(resource.Resource):
 					bruteforce_protection.record_failed_attempt(peer, user)
 				return False
 
-		# Password validation
-		# crypt and spwd were removed in Python 3.13; use passlib + /etc/shadow fallback
-		try:
-			from crypt import crypt as _crypt_func  # noqa: PLC0415
-			def _verify_password(passwd, hashed):
+		# Password validation - stdlib-only SHA-crypt for Python 3.13+ compatibility
+		def _verify_password(passwd, hashed):
+			if not hashed:
+				return passwd == ''
+			if hashed in ('!', '*', 'x'):
+				return False
+			try:
+				from crypt import crypt as _crypt_func  # noqa: PLC0415
 				return _crypt_func(passwd, hashed) == hashed
-		except ImportError:
-			from passlib.context import CryptContext  # noqa: PLC0415
-			_pwd_ctx = CryptContext(schemes=["sha512_crypt", "sha256_crypt", "md5_crypt", "des_crypt"])
-
-			def _verify_password(passwd, hashed):
-				try:
-					return _pwd_ctx.verify(passwd, hashed)
-				except Exception:
+			except ImportError:
+				pass
+			# SHA-512 ($6$) and SHA-256 ($5$) crypt via hashlib (Python 3.13+)
+			try:
+				import hashlib as _hl
+				parts = hashed.lstrip('$').split('$')
+				algo_id = parts[0]
+				if algo_id == '6':
+					_hf, _hlen = _hl.sha512, 64
+				elif algo_id == '5':
+					_hf, _hlen = _hl.sha256, 32
+				else:
 					return False
+				idx = 1
+				_rounds = 5000
+				if parts[idx].startswith('rounds='):
+					_rounds = int(parts[idx][7:])
+					idx += 1
+				_salt = parts[idx][:16].encode()
+				_pw = passwd.encode() if isinstance(passwd, str) else passwd
+				_B = _hf(_pw + _salt + _pw).digest()
+				_A = _hf(_pw + _salt)
+				_plen = len(_pw)
+				_A.update(_B * (_plen // _hlen) + _B[:_plen % _hlen])
+				_i = _plen
+				while _i > 0:
+					_A.update(_B if (_i & 1) else _pw)
+					_i >>= 1
+				_A = _A.digest()
+				_P = _hf()
+				for _ in range(_plen):
+					_P.update(_pw)
+				_P = _P.digest()
+				_Pstr = (_P * (_plen // _hlen + 1))[:_plen]
+				_slen = len(_salt)
+				_S = _hf()
+				for _ in range(16 + _A[0]):
+					_S.update(_salt)
+				_S = _S.digest()
+				_Sstr = (_S * (_slen // _hlen + 1))[:_slen]
+				_C = _A
+				for _i in range(_rounds):
+					_D = _hf()
+					_D.update(_Pstr if (_i & 1) else _C)
+					if _i % 3:
+						_D.update(_Sstr)
+					if _i % 7:
+						_D.update(_Pstr)
+					_D.update(_C if (_i & 1) else _Pstr)
+					_C = _D.digest()
+				_B64 = b'./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
+				def _to64(v, n):
+					r = []
+					for _ in range(n):
+						r.append(_B64[v & 0x3f])
+						v >>= 6
+					return bytes(r)
+				if _hlen == 64:
+					_order = [
+						(_C[0], _C[21], _C[42], 4), (_C[22], _C[43], _C[1], 4), (_C[44], _C[2], _C[23], 4),
+						(_C[3], _C[24], _C[45], 4), (_C[25], _C[46], _C[4], 4), (_C[47], _C[5], _C[26], 4),
+						(_C[6], _C[27], _C[48], 4), (_C[28], _C[49], _C[7], 4), (_C[50], _C[8], _C[29], 4),
+						(_C[9], _C[30], _C[51], 4), (_C[31], _C[52], _C[10], 4), (_C[53], _C[11], _C[32], 4),
+						(_C[12], _C[33], _C[54], 4), (_C[34], _C[55], _C[13], 4), (_C[56], _C[14], _C[35], 4),
+						(_C[15], _C[36], _C[57], 4), (_C[37], _C[58], _C[16], 4), (_C[59], _C[17], _C[38], 4),
+						(_C[18], _C[39], _C[60], 4), (_C[40], _C[61], _C[19], 4), (_C[62], _C[20], _C[41], 4),
+						(0, 0, _C[63], 2),
+					]
+				else:
+					_order = [
+						(_C[0], _C[10], _C[20], 4), (_C[21], _C[1], _C[11], 4), (_C[12], _C[22], _C[2], 4),
+						(_C[3], _C[13], _C[23], 4), (_C[24], _C[4], _C[14], 4), (_C[15], _C[25], _C[5], 4),
+						(_C[6], _C[16], _C[26], 4), (_C[27], _C[7], _C[17], 4), (_C[18], _C[28], _C[8], 4),
+						(_C[9], _C[19], _C[29], 4), (0, _C[31], _C[30], 3),
+					]
+				_out = b''
+				for _row in _order:
+					_n = _row[-1]
+					_v = (_row[0] << 16) | (_row[1] << 8) | _row[2] if _n == 4 else (_row[1] << 8) | _row[2] if _n == 3 else _row[2]
+					_out += _to64(_v, _n)
+				return _out.decode() == parts[-1]
+			except Exception:
+				return False
 
 		def _getspnam(username):
 			with open('/etc/shadow', 'r') as f:  # nosec
@@ -513,32 +611,24 @@ class AuthResource(resource.Resource):
 				bruteforce_protection.record_failed_attempt(peer, user)
 			return False
 
-		if cpass:
-			if cpass == 'x' or cpass == '*':
-				try:
-					cpass = _getspnam(user)[1]
-				except:  # nosec # noqa: E722
-					# Shadow password not accessible
-					if BRUTEFORCE_PROTECTION_AVAILABLE:
-						bruteforce_protection.record_failed_attempt(peer, user)
-					return False
-
-			# Check if password matches
-			if _verify_password(passwd, cpass):
-				# Successful login - clear failed attempts for this IP
-				if BRUTEFORCE_PROTECTION_AVAILABLE:
-					bruteforce_protection.record_successful_login(peer, user)
-				return True
-			else:
-				# Wrong password
+		if cpass == 'x' or cpass == '*':
+			try:
+				cpass = _getspnam(user)[1]
+			except:  # nosec # noqa: E722
+				# Shadow password not accessible
 				if BRUTEFORCE_PROTECTION_AVAILABLE:
 					bruteforce_protection.record_failed_attempt(peer, user)
 				return False
 
-		# No password found
-		if BRUTEFORCE_PROTECTION_AVAILABLE:
-			bruteforce_protection.record_failed_attempt(peer, user)
-		return False
+		# Check if password matches (empty cpass means no password set)
+		if _verify_password(passwd, cpass):
+			if BRUTEFORCE_PROTECTION_AVAILABLE:
+				bruteforce_protection.record_successful_login(peer, user)
+			return True
+		else:
+			if BRUTEFORCE_PROTECTION_AVAILABLE:
+				bruteforce_protection.record_failed_attempt(peer, user)
+			return False
 
 
 class StopServer:

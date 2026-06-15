@@ -21,14 +21,13 @@
 ##########################################################################
 
 from __future__ import print_function
-from OpenSSL import crypto
-from socket import gethostname
-from time import time
 
 from Tools.Directories import resolveFilename, SCOPE_CONFIG
 
+import datetime
+import ipaddress
 import os
-import six
+import socket
 
 CA_FILE = resolveFilename(SCOPE_CONFIG, "ca.pem")
 KEY_FILE = resolveFilename(SCOPE_CONFIG, "key.pem")
@@ -39,42 +38,102 @@ CHAIN_FILE = resolveFilename(SCOPE_CONFIG, "chain.pem")
 class SSLCertificateGenerator:
 
 	def __init__(self):
-		# define some defaults
-		self.type = crypto.TYPE_RSA
 		self.bits = 2048
-		self.digest = 'sha256'
-		self.certSubjectOptions = {
-			'O': 'Home',
-			'OU': gethostname(),
-			'CN': gethostname()
-		}
+
+	def _certNeedsRegen(self):
+		# Regenerate if cert is v1 (no SANs) - modern browsers reject these
+		try:
+			from OpenSSL import crypto
+			cert = crypto.load_certificate(crypto.FILETYPE_PEM, open(CERT_FILE, 'rt').read())
+			if cert.get_version() < 2:
+				print("[OpenWebif] Existing cert is v1 (no SANs), regenerating...")
+				return True
+			for i in range(cert.get_extension_count()):
+				if cert.get_extension(i).get_short_name() == b'subjectAltName':
+					return False
+			print("[OpenWebif] Existing cert has no SANs, regenerating...")
+			return True
+		except Exception:
+			return True
+
+	def _getLocalIPs(self):
+		ips = []
+		try:
+			s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+			s.connect(('8.8.8.8', 80))
+			ips.append(s.getsockname()[0])
+			s.close()
+		except Exception:
+			pass
+		return ips
 
 	# generate and install a self signed SSL certificate if none exists
 	def installCertificates(self):
 		if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
-			return
-		keypair = self.__genKeyPair()
-		certificate = self.__genCertificate(keypair)
+			if not self._certNeedsRegen():
+				return
+			os.remove(CERT_FILE)
+			os.remove(KEY_FILE)
+		key_pem, cert_pem = self._genKeyAndCert()
 		print("[OpenWebif] Install newly generated key pair and certificate")
-		open(KEY_FILE, "wt").write(six.ensure_str(crypto.dump_privatekey(crypto.FILETYPE_PEM, keypair)))
-		open(CERT_FILE, "wt").write(six.ensure_str(crypto.dump_certificate(crypto.FILETYPE_PEM, certificate)))
+		open(KEY_FILE, "wt").write(key_pem)
+		open(CERT_FILE, "wt").write(cert_pem)
 
-	# generate a key pair
-	def __genKeyPair(self):
-		keypair = crypto.PKey()
-		keypair.generate_key(self.type, self.bits)
-		return keypair
+	def _genKeyAndCert(self):
+		from cryptography import x509
+		from cryptography.x509.oid import NameOID
+		from cryptography.hazmat.primitives import hashes, serialization
+		from cryptography.hazmat.primitives.asymmetric import rsa
+		from cryptography.hazmat.backends import default_backend
 
-	# create a SSL certificate and sign it
-	def __genCertificate(self, keypair):
-		certificate = crypto.X509()
-		subject = certificate.get_subject()
-		for key, val in six.iteritems(self.certSubjectOptions):
-			setattr(subject, key, val)
-		certificate.set_serial_number(int(time()))
-		certificate.gmtime_adj_notBefore(0)
-		certificate.gmtime_adj_notAfter(60 * 60 * 24 * 365 * 5)
-		certificate.set_issuer(subject)
-		certificate.set_pubkey(keypair)
-		certificate.sign(keypair, self.digest)
-		return certificate
+		hostname = socket.gethostname()
+		now = datetime.datetime.utcnow()
+
+		key = rsa.generate_private_key(
+			public_exponent=65537,
+			key_size=self.bits,
+			backend=default_backend()
+		)
+
+		subject = x509.Name([
+			x509.NameAttribute(NameOID.ORGANIZATION_NAME, u'Home'),
+			x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, hostname),
+			x509.NameAttribute(NameOID.COMMON_NAME, hostname),
+		])
+
+		san_names = [
+			x509.DNSName(hostname),
+			x509.DNSName(hostname + u'.local'),
+			x509.IPAddress(ipaddress.IPv4Address(u'127.0.0.1')),
+		]
+		for ip in self._getLocalIPs():
+			try:
+				addr = ipaddress.ip_address(ip)
+				entry = x509.IPAddress(addr)
+				if entry not in san_names:
+					san_names.append(entry)
+			except Exception:
+				pass
+
+		cert = (
+			x509.CertificateBuilder()
+			.subject_name(subject)
+			.issuer_name(subject)
+			.public_key(key.public_key())
+			.serial_number(x509.random_serial_number())
+			.not_valid_before(now)
+			.not_valid_after(now + datetime.timedelta(days=365 * 5))
+			.add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+			.add_extension(x509.SubjectAlternativeName(san_names), critical=False)
+			.sign(key, hashes.SHA256(), default_backend())
+		)
+
+		key_pem = key.private_bytes(
+			encoding=serialization.Encoding.PEM,
+			format=serialization.PrivateFormat.TraditionalOpenSSL,
+			encryption_algorithm=serialization.NoEncryption()
+		).decode('utf-8')
+
+		cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode('utf-8')
+
+		return key_pem, cert_pem
