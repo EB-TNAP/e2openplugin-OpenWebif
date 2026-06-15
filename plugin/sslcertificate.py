@@ -41,16 +41,14 @@ class SSLCertificateGenerator:
 		self.bits = 2048
 
 	def _certNeedsRegen(self):
-		# Regenerate if cert is v1 (no SANs) - modern browsers reject these
+		# Regenerate if cert lacks SANs - modern browsers reject certs without them
 		try:
-			from OpenSSL import crypto
-			cert = crypto.load_certificate(crypto.FILETYPE_PEM, open(CERT_FILE, 'rt').read())
-			if cert.get_version() < 2:
-				print("[OpenWebif] Existing cert is v1 (no SANs), regenerating...")
-				return True
-			for i in range(cert.get_extension_count()):
-				if cert.get_extension(i).get_short_name() == b'subjectAltName':
-					return False
+			from cryptography import x509
+			from cryptography.hazmat.backends import default_backend
+			cert = x509.load_pem_x509_certificate(open(CERT_FILE, 'rb').read(), default_backend())
+			cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+			return False
+		except x509.ExtensionNotFound:
 			print("[OpenWebif] Existing cert has no SANs, regenerating...")
 			return True
 		except Exception:
