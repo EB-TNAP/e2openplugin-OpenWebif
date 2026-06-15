@@ -222,15 +222,15 @@ class BruteForceLogViewer(Screen):
 
 class OpenWebifConfig(Screen, ConfigListScreen):
 	skin = """
-	<screen position="center,center" size="700,340" title="OpenWebif Configuration">
-		<widget name="lab1" position="10,30" halign="center" size="680,60" zPosition="1" font="Regular;24" valign="top" transparent="1" />
-		<widget name="config" position="10,100" size="680,180" scrollbarMode="showOnDemand" />
-		<ePixmap position="10,290" size="140,40" pixmap="skin_default/buttons/red.png" alphatest="on" />
-		<widget name="key_red" position="10,290" zPosition="1" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="red" transparent="1" />
-		<ePixmap position="185,290" size="140,40" pixmap="skin_default/buttons/green.png" alphatest="on" zPosition="1" />
-		<widget name="key_green" position="185,290" zPosition="2" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="green" transparent="1" />
-		<ePixmap position="360,290" size="140,40" pixmap="skin_default/buttons/blue.png" alphatest="on" zPosition="1" />
-		<widget name="key_blue" position="360,290" zPosition="2" size="140,40" font="Regular;20" halign="center" valign="center" backgroundColor="blue" transparent="1" />
+	<screen position="center,center" size="900,620" title="OpenWebif Configuration">
+		<widget name="lab1" position="10,30" halign="center" size="880,60" zPosition="1" font="Regular;24" valign="top" transparent="1" />
+		<widget name="config" position="10,100" size="880,460" scrollbarMode="showOnDemand" />
+		<ePixmap position="20,570" size="160,42" pixmap="skin_default/buttons/red.png" alphatest="on" />
+		<widget name="key_red" position="20,570" zPosition="1" size="160,42" font="Regular;22" halign="center" valign="center" backgroundColor="red" transparent="1" />
+		<ePixmap position="200,570" size="160,42" pixmap="skin_default/buttons/green.png" alphatest="on" zPosition="1" />
+		<widget name="key_green" position="200,570" zPosition="2" size="160,42" font="Regular;22" halign="center" valign="center" backgroundColor="green" transparent="1" />
+		<ePixmap position="380,570" size="160,42" pixmap="skin_default/buttons/blue.png" alphatest="on" zPosition="1" />
+		<widget name="key_blue" position="380,570" zPosition="2" size="160,42" font="Regular;22" halign="center" valign="center" backgroundColor="blue" transparent="1" />
 	</screen>"""
 
 	def __init__(self, session):
