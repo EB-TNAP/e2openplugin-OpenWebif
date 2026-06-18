@@ -853,7 +853,7 @@ function getStatusInfo() {
 function grabScreenshot(mode) {
 	$('#screenshotspinner').show();
 	
-	$('#screenshotimage').load(function(){
+	$('#screenshotimage').off('load').on('load', function(){
 	  $('#screenshotspinner').hide();
 	});
 
