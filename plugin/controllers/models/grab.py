@@ -37,7 +37,7 @@ GRAB_PATH = '/usr/bin/grab'
 # OSD-only mode.  The new screen may not have finished its first render cycle
 # by the time the grab request arrives, so we delay execution slightly to let
 # enigma2 complete the paint before capturing.
-OSD_FALLBACK_GRAB_DELAY = 0.75
+OSD_FALLBACK_GRAB_DELAY = 0.15
 
 
 class GrabRequest(object):
