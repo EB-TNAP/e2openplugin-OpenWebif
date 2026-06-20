@@ -863,7 +863,7 @@ function getStatusInfo() {
 function grabScreenshot(mode) {
 	$('#screenshotspinner').show();
 	
-	$('#screenshotimage').off('load').on('load', function(){
+	$('#screenshotimage').off('load.grab').on('load.grab', function(){
 	  $('#screenshotspinner').hide();
 	});
 
@@ -2171,10 +2171,10 @@ var SSHelperObj = function () {
 		setup: function()
 		{
 			self = this;
-			clearInterval(self.screenshotInterval);
+			self.stopSSInterval();
 			self.ssr_i = parseInt($('#ssr_i').val());
 			self.ssr_hd = $('#ssr_hd').is(':checked');
-			
+
 			$('#screenshotbutton0').click(function(){testPipStatus(); grabScreenshot('all');});
 			$('#screenshotbutton1').click(function(){testPipStatus(); grabScreenshot('video');});
 			$('#screenshotbutton2').click(function(){testPipStatus(); grabScreenshot('osd');});
@@ -2193,7 +2193,7 @@ var SSHelperObj = function () {
 				webapi_execute("/api/setwebconfig?screenshot_high_resolution=" + ( self.ssr_hd ? "true" : "false"));
 				grabScreenshot('auto');
 			});
-		
+
 			$('#ssr_i').change(function() {
 				testPipStatus();
 				var t = $('#ssr_i').val();
@@ -2201,22 +2201,22 @@ var SSHelperObj = function () {
 				self.ssr_i = parseInt(t);
 				if($('#ssr_s').is(':checked'))
 				{
-					clearInterval(self.screenshotInterval);
+					self.stopSSInterval();
 					self.setSInterval();
 				}
 			});
-			
+
 			$('#ssr_s').change(function() {
 				testPipStatus();
 				var v = $('#ssr_s').is(':checked');
 				if (v) {
 					self.setSInterval();
 				} else {
-					clearInterval(self.screenshotInterval); 
+					self.stopSSInterval();
 				}
 				webapi_execute("/api/setwebconfig?screenshot_refresh_auto=" + (v ? "true":"false"));
 			});
-		
+
 			screenshotMode = 'all'; // reset on page reload
 			grabScreenshot(screenshotMode);
 
@@ -2224,9 +2224,36 @@ var SSHelperObj = function () {
 				self.setSInterval();
 			}
 
-		},setSInterval: function()
+		},
+
+		stopSSInterval: function()
 		{
-			self.screenshotInterval = setInterval( function() { testPipStatus(); grabScreenshot('auto'); }, (self.ssr_i+1)*1000);
+			self._ssRunning = false;
+			clearInterval(self.screenshotInterval);
+			self.screenshotInterval = false;
+			$('#screenshotimage').off('load.sschain error.sschain');
+		},
+
+		setSInterval: function()
+		{
+			self._ssRunning = true;
+			var gap = Math.max(self.ssr_i, 0) * 1000;
+
+			function doShot() {
+				if (!self._ssRunning) return;
+				testPipStatus();
+				var $img = $('#screenshotimage');
+				$img.off('load.sschain error.sschain');
+				$img.one('load.sschain', function() {
+					if (self._ssRunning) setTimeout(doShot, gap);
+				});
+				$img.one('error.sschain', function() {
+					if (self._ssRunning) setTimeout(doShot, Math.max(gap, 1000));
+				});
+				grabScreenshot('auto');
+			}
+
+			doShot();
 		}
 	};
 };

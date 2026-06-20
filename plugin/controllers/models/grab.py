@@ -26,16 +26,24 @@ from ServiceReference import ServiceReference
 from Components.config import config
 from Screens.InfoBar import InfoBar
 from twisted.web import resource, server
+from twisted.internet import reactor
 from enigma import eDBoxLCD
 import time
 from Plugins.Extensions.OpenWebif.controllers.utilities import getUrlArg
 
 GRAB_PATH = '/usr/bin/grab'
 
+# When no live service is playing (e.g. during blindscan) we fall back to
+# OSD-only mode.  The new screen may not have finished its first render cycle
+# by the time the grab request arrives, so we delay execution slightly to let
+# enigma2 complete the paint before capturing.
+OSD_FALLBACK_GRAB_DELAY = 0.75
+
 
 class GrabRequest(object):
 	def __init__(self, request, session):
 		self.request = request
+		self._delay_timer = None
 
 		mode = None
 		graboptions = [GRAB_PATH, '-q', '-s']
@@ -50,11 +58,34 @@ class GrabRequest(object):
 			fileformat = "bmp"
 
 		size = getUrlArg(request, "r")
+
+		mode = getUrlArg(request, "mode")
+		# When no live service is playing (e.g. tuner taken over during blindscan)
+		# and the caller has not explicitly requested a specific capture layer,
+		# fall back to OSD-only mode so overlay dialogs are captured cleanly
+		# without video bleed-through from the framebuffer background.
+		osd_fallback = False
+		if mode is None or mode not in ("osd", "video", "pip", "lcd"):
+			try:
+				if session.nav.getCurrentlyPlayingServiceReference() is None:
+					mode = "osd"
+					osd_fallback = True
+			except Exception:
+				mode = "osd"
+				osd_fallback = True
+
+		# OSD-only capture reads the raw framebuffer in software; on 4K boxes
+		# this can be very slow.  Cap to 1280px when the caller did not request
+		# a specific size so the grab completes quickly without sacrificing
+		# readability of dialog screens.
+		if osd_fallback and size is None:
+			size = "1280"
+
 		if size != None:
 			graboptions.append("-r")
 			graboptions.append("%d" % int(size))
 
-		mode = getUrlArg(request, "mode")
+		command = None
 		if mode != None:
 			if mode == "osd":
 				graboptions.append("-o")
@@ -69,27 +100,27 @@ class GrabRequest(object):
 				fileformat = "png"
 				command = "cat /tmp/lcdshot.%s" % fileformat
 
+		self._mode = mode
+		self._command = command
+		self._graboptions = graboptions
+
 		self.filepath = "/tmp/screenshot." + fileformat
 		self.container = eConsoleAppContainer()
 		self.container.appClosed.append(self.grabFinished)
 		self.container.stdoutAvail.append(request.write)
 		self.container.setBufferSize(32768)
-		if mode == "lcd":
-			if self.container.execute(command):
-				raise Exception("failed to execute: ", command)
-			sref = 'lcdshot'
-		else:
-			self.container.execute(GRAB_PATH, *graboptions)
-			try:
-				if mode == "pip" and InfoBar.instance.session.pipshown:
-					ref = InfoBar.instance.session.pip.getCurrentService().toString()
-				else:
-					ref = session.nav.getCurrentlyPlayingServiceReference().toString()
-				sref = '_'.join(ref.split(':', 10)[:10])
-				if config.OpenWebif.webcache.screenshotchannelname.value:
-					sref = ServiceReference(ref).getServiceName()
-			except:  # nosec # noqa: E722
-				sref = 'screenshot'
+
+		try:
+			if mode == "pip" and InfoBar.instance.session.pipshown:
+				ref = InfoBar.instance.session.pip.getCurrentService().toString()
+			else:
+				ref = session.nav.getCurrentlyPlayingServiceReference().toString()
+			sref = '_'.join(ref.split(':', 10)[:10])
+			if config.OpenWebif.webcache.screenshotchannelname.value:
+				sref = ServiceReference(ref).getServiceName()
+		except:  # nosec # noqa: E722
+			sref = 'screenshot'
+
 		sref = sref + '_' + time.strftime("%Y%m%d%H%M%S", time.localtime(time.time()))
 		request.notifyFinish().addErrback(self.requestAborted)
 		request.setHeader('Content-Disposition', 'inline; filename=%s.%s;' % (sref, fileformat))
@@ -98,11 +129,31 @@ class GrabRequest(object):
 		request.setHeader('Cache-Control', 'no-store, must-revalidate, post-check=0, pre-check=0')
 		request.setHeader('Pragma', 'no-cache')
 
+		if osd_fallback:
+			self._delay_timer = reactor.callLater(OSD_FALLBACK_GRAB_DELAY, self._executeGrab)
+		else:
+			self._executeGrab()
+
+	def _executeGrab(self):
+		self._delay_timer = None
+		if self._mode == "lcd":
+			if self.container.execute(self._command):
+				raise Exception("failed to execute: ", self._command)
+		else:
+			self.container.execute(GRAB_PATH, *self._graboptions)
+
 	def requestAborted(self, err):
-		# Called when client disconnected early, abort the process and
-		# don't call request.finish()
-		del self.container.appClosed[:]
-		self.container.kill()
+		# Called when client disconnected early; cancel any pending timer,
+		# abort the process and don't call request.finish().
+		if self._delay_timer is not None:
+			try:
+				self._delay_timer.cancel()
+			except Exception:
+				pass
+			self._delay_timer = None
+		else:
+			del self.container.appClosed[:]
+			self.container.kill()
 		del self.request
 		del self.container
 
